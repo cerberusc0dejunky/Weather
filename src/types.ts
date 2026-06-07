@@ -33,6 +33,7 @@ export interface NWSAlert {
   snippet: string;
   keywords: AlertKeywords;
   justUpdated: boolean;
+  threatLevel: 'Low' | 'Moderate' | 'High' | 'Extreme';
 }
 
 export interface TelemetryConditions {

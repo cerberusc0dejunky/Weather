@@ -626,6 +626,38 @@ export default function App() {
         }
       }
 
+      // Compute qualitative Threat Level indicator based on proximity and keyword analysis
+      let calculatedThreatLevel: 'Low' | 'Moderate' | 'High' | 'Extreme' = 'Low';
+      const isWarning = eventName.toUpperCase().includes('WARNING');
+      const isWatch = eventName.toUpperCase().includes('WATCH');
+      const isTornado = eventName.toUpperCase().includes('TORNADO');
+
+      if (isWarning && (matchedInZone || shortestDistance <= 5)) {
+        if (hasEmergency || hasObserved || isDestructive || isTornado) {
+          calculatedThreatLevel = 'Extreme';
+        } else {
+          calculatedThreatLevel = 'High';
+        }
+      } else if (isWarning && (matchedInZone || shortestDistance <= 25)) {
+        calculatedThreatLevel = 'High';
+      } else if (isWarning && shortestDistance <= 50) {
+        if (isHeadingTowards) {
+          calculatedThreatLevel = 'High';
+        } else {
+          calculatedThreatLevel = 'Moderate';
+        }
+      } else if (isWatch && (matchedInZone || shortestDistance <= 25)) {
+        if (isTornado && (hasRotation || hasFunnel)) {
+          calculatedThreatLevel = 'High';
+        } else {
+          calculatedThreatLevel = 'Moderate';
+        }
+      } else if (shortestDistance <= 25 && (hasRotation || hasFunnel || hasPossible)) {
+        calculatedThreatLevel = 'Moderate';
+      } else {
+        calculatedThreatLevel = 'Low';
+      }
+
       processedList.push({
         id: props.id || Math.random().toString(),
         event: eventName,
@@ -649,6 +681,7 @@ export default function App() {
           vector: vectorMatch,
         },
         justUpdated: wasUpdated,
+        threatLevel: calculatedThreatLevel,
       });
     });
 

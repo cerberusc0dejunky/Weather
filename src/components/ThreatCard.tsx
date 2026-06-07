@@ -101,6 +101,17 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
     }
   };
 
+  // Threat Level Visual Indicators (No emojis as requested)
+  const threatLevel = alert.threatLevel || 'Low';
+  let threatLevelBadge = 'bg-slate-900 border border-slate-700 text-slate-400';
+  if (threatLevel === 'Extreme') {
+    threatLevelBadge = 'bg-rose-950/90 text-rose-400 border border-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.4)] animate-pulse';
+  } else if (threatLevel === 'High') {
+    threatLevelBadge = 'bg-orange-950/90 text-orange-400 border border-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.3)]';
+  } else if (threatLevel === 'Moderate') {
+    threatLevelBadge = 'bg-amber-955/90 text-amber-400 border border-amber-500';
+  }
+
   return (
     <div className={`flex flex-col rounded-2xl overflow-hidden transition-all duration-300 ${cardClass}`} id={`alert-card-${alert.id}`}>
       {/* Top Event Title Bar */}
@@ -114,6 +125,16 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
       </div>
 
       <div className="p-5 flex-grow flex flex-col justify-between">
+        {/* Qualitative Threat Level Section */}
+        <div className="flex justify-between items-center mb-3">
+          <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Threat Assessment
+          </span>
+          <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${threatLevelBadge}`}>
+            THREAT LEVEL: {threatLevel}
+          </span>
+        </div>
+
         {/* Status Alarm Banner */}
         <div className={`p-4 rounded-xl flex flex-col text-center justify-center ${actionBg} transition-all duration-250`}>
           <span className="text-xl md:text-2xl font-black uppercase tracking-wide leading-tight">
