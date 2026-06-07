@@ -1,0 +1,6 @@
+{
+  "name": "DAISY Emergency Weather System",
+  "description": "Progressive Weather Warning System with Interactive Maps, Real-Time Proximity Alerts, and Trajectory Prediction.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
