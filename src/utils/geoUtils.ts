@@ -100,6 +100,72 @@ export function getMinPolygonDistance(
   return { minDist, closestPt, isInside };
 }
 
+interface MemoizedPolygonDistanceResult {
+  minDist: number;
+  closestPt: [number, number] | null;
+  isInside: boolean;
+}
+
+const polygonDistanceCache = new Map<string, MemoizedPolygonDistanceResult>();
+
+export function getMemoizedMinPolygonDistance(
+  assetId: string,
+  assetLat: number,
+  assetLon: number,
+  alertId: string,
+  geometryCoordinates: any
+): MemoizedPolygonDistanceResult {
+  if (!alertId) {
+    return getMinPolygonDistance(assetLat, assetLon, geometryCoordinates);
+  }
+  
+  const cacheKey = `${alertId}_${assetId}_${assetLat.toFixed(5)}_${assetLon.toFixed(5)}`;
+  
+  if (polygonDistanceCache.has(cacheKey)) {
+    return polygonDistanceCache.get(cacheKey)!;
+  }
+
+  const result = getMinPolygonDistance(assetLat, assetLon, geometryCoordinates);
+  
+  // Guard memory growth: prune-on-overflow simple check
+  if (polygonDistanceCache.size > 2000) {
+    polygonDistanceCache.clear();
+  }
+  
+  polygonDistanceCache.set(cacheKey, result);
+  return result;
+}
+
+export function getGeometryCentroid(geometryCoordinates: any): { lat: number; lon: number } | null {
+  let sumLat = 0;
+  let sumLon = 0;
+  let count = 0;
+
+  function traverse(arr: any) {
+    if (!Array.isArray(arr)) return;
+
+    if (
+      arr.length >= 2 &&
+      typeof arr[0] === 'number' &&
+      typeof arr[1] === 'number'
+    ) {
+      sumLon += arr[0];
+      sumLat += arr[1];
+      count++;
+    } else {
+      for (let i = 0; i < arr.length; i++) {
+        traverse(arr[i]);
+      }
+    }
+  }
+
+  traverse(geometryCoordinates);
+  if (count > 0) {
+    return { lat: sumLat / count, lon: sumLon / count };
+  }
+  return null;
+}
+
 export const usStatesAbbr: Record<string, string> = {
   Alabama: 'AL',
   Alaska: 'AK',
@@ -245,4 +311,65 @@ export function getParsedPolygonMinDistance(
   
   return { minDist, isInside: false };
 }
+
+export interface StormTrajectory {
+  direction: string | null;
+  speed: number | null;
+  unit: string | null;
+  hasTrajectory: boolean;
+}
+
+/**
+ * Parses the NWS alert text to extract storm motion vectors safely.
+ * Only enforces warnings on event types known to carry tracking vectors.
+ */
+export function parseStormTrajectory(
+  eventName: string,
+  fullText: string
+): StormTrajectory {
+  const text = fullText || "";
+  const eventType = eventName || "";
+
+  // Define convective events where a tracking vector is expected
+  const vectorExpectedEvents = [
+    "Tornado Warning",
+    "Severe Thunderstorm Warning",
+    "Special Marine Warning"
+  ];
+
+  // Standard NWS vector pattern match (e.g., "MOVING NORTHEAST AT 35 MPH") supporting hyphenated directions and knots
+  const vectorRegex = /MOVING\s+(?:TO\s+THE\s+)?([0-9A-Z-\s]+?)\s+AT\s+(\d+)\s*(MPH|KT|KTS|KNOTS|KNOT)/i;
+  const match = text.match(vectorRegex);
+
+  if (match) {
+    return {
+      direction: match[1].toUpperCase(),
+      speed: parseInt(match[2], 10),
+      unit: match[3].toUpperCase(),
+      hasTrajectory: true
+    };
+  }
+
+  // If no match is found, check if we actually expected one for this event type
+  const isConvectiveWarning = vectorExpectedEvents.some(evt => 
+    eventType.toLowerCase().includes(evt.toLowerCase())
+  );
+
+  if (isConvectiveWarning) {
+    // Only log an actual tracking failure if the event type is supposed to have a vector
+    console.warn(
+      `[NWS TRAJECTORY PARSING FAIL] Expected vector pattern but failed to match regex. ` +
+      `Event: "${eventType}". Substring context: "${text.substring(0, 60).replace(/\n/g, ' ')}..."`
+    );
+  }
+
+  // Return clean fallback state for watches, fire advisories, and statements
+  return {
+    direction: null,
+    speed: null,
+    unit: null,
+    hasTrajectory: false
+  };
+}
+
 

@@ -8,29 +8,32 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { LocationAsset, NWSAlert, TelemetryConditions, SystemSettings, MesoscaleDiscussion } from './types';
+import { LocationAsset, NWSAlert, TelemetryConditions, SystemSettings, MesoscaleDiscussion, RotationPin } from './types';
 import {
   getDistance,
   getBearing,
   getMinPolygonDistance,
+  getMemoizedMinPolygonDistance,
+  getGeometryCentroid,
   formatAddress,
   cardinalBearings,
   parseSPCLatLon,
   isPointInParsedPolygon,
   getParsedPolygonMinDistance,
+  parseStormTrajectory,
 } from './utils/geoUtils';
 import ThreatCard from './components/ThreatCard';
 import GeolocationModal from './components/GeolocationModal';
 import RadarMap from './components/RadarMap';
+import AlertHistory, { ResolvedAlert } from './components/AlertHistory';
+import WindGauge from './components/WindGauge';
+import CapeHistoryChart from './components/CapeHistoryChart';
 
 // Lucide Icons (Never use Emojis!)
 import {
   Compass,
   Activity,
-  Wifi,
-  WifiOff,
   Share2,
-  Settings as SettingsIcon,
   Plus,
   Trash2,
   MapPin,
@@ -41,7 +44,6 @@ import {
   VibrateOff,
   Radio,
   Clock,
-  LayoutGrid,
   Wind,
   Thermometer,
   Gauge,
@@ -59,6 +61,8 @@ const TRACKED_ALERTS_FILTER = [
   'Severe Thunderstorm Warning',
   'Severe Weather Statement',
   'Special Weather Statement',
+  'Flash Flood Warning',
+  'Flood Watch',
 ];
 
 // Siren sound process
@@ -137,60 +141,6 @@ class SirenProcessor {
 
 const siren = new SirenProcessor();
 
-const SAMPLE_MCD_TEXT = `   Mesoscale Discussion 1014
-   NWS Storm Prediction Center Norman OK
-   0116 PM CDT Sun Jun 07 2026
-
-   Areas affected...portions of the Ozarks and ArkLaTex
-
-   Concerning...Severe potential...Watch possible 
-
-   Valid 071816Z - 072015Z
-
-   Probability of Watch Issuance...40 percent
-
-   SUMMARY...Scattered to numerous thunderstorms are expected this
-   afternoon from the Ozarks southward into the Ouachita Mountains and
-   ArkLaTex. A couple of tornadoes and isolated damaging winds gusts
-   are possible. Trends will be monitored for the potential issuance of
-   a targeted Tornado Watch for a portion of the discussion area.
-
-   DISCUSSION...Continued heating of a very moist low-level air mass is
-   supporting an increase in thunderstorm coverage across portions of
-   the Ozarks southward into ArkLaTex as of early this afternoon ahead
-   of an MCV evident near Tulsa, OK, in latest satellite/radar imagery.
-   An associated band of 30-40+ kt southwesterly mid-level flow is
-   located downstream of this MCV, with around 40-45 kt recently
-   sampled around 4 km AGL by the SRX/SGF VAD profiles. This will
-   continue to contribute to a modest enlargement of low-level
-   hodographs, with around 100 m2/s2 0-1 km SRH expected by
-   mid-afternoon. This will promote the potential for weak supercells
-   and a couple of tornadoes, with the greatest potential expected
-   across southwestern Missouri and northwestern Arkansas where locally
-   backed surface flow yield a further enhancement to low-level
-   hodographs (around 70-75 0-1 km SRH recently sampled by the SGF
-   VAD). Rich moisture (PWATs of 1.75-2.0+ inches, as sampled by
-   regional 12z observed soundings) may also support occasional
-   water-loaded downbursts and isolated damaging wind gusts.
-
-   Convective trends will continue to be monitored, and a targeted
-   Tornado Watch may be considered for a portion of the discussion
-   area.
-
-   ..Chalmers/Smith.. 06/07/2026
-
-   ...Please see www.spc.noaa.gov for graphic product...
-
-   ATTN...WFO...LSX...LZK...SGF...SHV...EAX...TSA...
-
-   LAT...LON   34079493 34539504 35509509 36969505 38169492 38699461
-               38929419 39099349 39109303 39049266 38539167 38269138
-               37879129 36859151 35599200 35119227 34499264 34019328
-               33869383 33869438 33909470 34079493 
-
-   MOST PROBABLE PEAK TORNADO INTENSITY...85-110 MPH
-   MOST PROBABLE PEAK WIND GUST...UP TO 60 MPH`;
-
 function parseMesoscaleDiscussion(id: string, issuanceTime: string, text: string): MesoscaleDiscussion {
   const numberMatch = text.match(/Mesoscale Discussion\s+(\d+)/i);
   const number = numberMatch ? numberMatch[1] : 'Unknown';
@@ -264,6 +214,75 @@ function PressureBaroTooltip({ active, payload }: PressureTooltipProps) {
   return null;
 }
 
+function translateAlertsToRotationPins(activeAlerts: NWSAlert[]): RotationPin[] {
+  const pins: RotationPin[] = [];
+  activeAlerts.forEach((alert) => {
+    const fullText = `${alert.event} ${alert.description || ''} ${alert.instruction || ''} ${alert.snippet || ''}`.toUpperCase();
+    const hasRotation = alert.keywords?.rotation ||
+      fullText.includes('ROTATION') ||
+      fullText.includes('VELOCITY COUPLING') ||
+      fullText.includes('TORNADIC') ||
+      fullText.includes('MESOCYCLONE') ||
+      fullText.includes('ROTATING WALL') ||
+      fullText.includes('ROTATING') ||
+      fullText.includes('COUPLING');
+
+    const hasObserved = alert.keywords?.observed ||
+      fullText.includes('OBSERVED') ||
+      fullText.includes('CONFIRMED') ||
+      fullText.includes('TORNADO ON THE GROUND') ||
+      fullText.includes('DEBRIS SIGNATURE') ||
+      fullText.includes('TORNADO DEBRIS') ||
+      fullText.includes('TDS') ||
+      fullText.includes('DAMAGING TORNADO');
+
+    const hasEmergency = alert.keywords?.emergency ||
+      fullText.includes('TORNADO EMERGENCY') ||
+      fullText.includes('PARTICULARLY DANGEROUS SITUATION') ||
+      fullText.includes('PDS') ||
+      fullText.includes('CATASTROPHIC') ||
+      alert.event.toUpperCase().includes('EMERGENCY');
+
+    const isTornadoWarning = alert.event.toUpperCase().includes('TORNADO WARNING') || 
+                            alert.event.toUpperCase().includes('EXTREME SEVERE WEATHER');
+
+    if (hasRotation && alert.geometry && alert.geometry.coordinates) {
+      const centroid = getGeometryCentroid(alert.geometry.coordinates);
+      if (centroid) {
+        let pinType: 'vortex' | 'radar_indicated' | 'mesocyclone' = 'mesocyclone';
+        let threatLevel: 'Normal' | 'Severe' | 'Extreme' = 'Normal';
+        
+        if (isTornadoWarning) {
+          if (hasObserved || hasEmergency) {
+            pinType = 'vortex';
+            threatLevel = 'Extreme';
+          } else {
+            pinType = 'radar_indicated';
+            threatLevel = 'Severe';
+          }
+        } else {
+          pinType = 'mesocyclone';
+          threatLevel = 'Normal';
+        }
+
+        pins.push({
+          id: `rot-${alert.id}`,
+          lat: centroid.lat,
+          lon: centroid.lon,
+          alertId: alert.id,
+          eventName: alert.event,
+          areaDesc: alert.areaDesc,
+          detectedAt: alert.sent || new Date().toISOString(),
+          pinType,
+          threatLevel,
+          isObserved: hasObserved || hasEmergency
+        });
+      }
+    }
+  });
+  return pins;
+}
+
 export default function App() {
   // Main State Configuration
   const [armed, setArmed] = useState<boolean>(false);
@@ -290,14 +309,32 @@ export default function App() {
   });
 
   const [alerts, setAlerts] = useState<NWSAlert[]>([]);
+  const [alertHistory, setAlertHistory] = useState<ResolvedAlert[]>(() => {
+    const raw = localStorage.getItem('daisy-alert-history');
+    return raw ? JSON.parse(raw) : [];
+  });
   const [discussions, setDiscussions] = useState<MesoscaleDiscussion[]>([]);
+  const [rawApiDiscussions, setRawApiDiscussions] = useState<MesoscaleDiscussion[]>([]);
   const [customMDs, setCustomMDs] = useState<MesoscaleDiscussion[]>([]);
+  const resolvedStationsRef = useRef<Record<string, string>>({});
   const [newMDText, setNewMDText] = useState<string>('');
   const [showMDInputForm, setShowMDInputForm] = useState<boolean>(false);
   const [expandedMDId, setExpandedMDId] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryConditions | null>(null);
-  const [mapMode, setMapMode] = useState<'radar' | 'gust'>('radar');
+  const [windyPointTelemetry, setWindyPointTelemetry] = useState<{
+    temp?: string;
+    dewpoint?: string;
+    wind?: string;
+    gust?: string;
+    pressure?: string;
+    cape?: number;
+    precip?: string;
+    modelUsed: string;
+  } | null>(null);
+  const [windyPointLoading, setWindyPointLoading] = useState<boolean>(false);
+  const [mapMode, setMapMode] = useState<'satellite' | 'radar' | 'wind'>('radar');
   const [pressureHistory, setPressureHistory] = useState<{ time: string; pressure: number }[]>([]);
+  const [capeHistory, setCapeHistory] = useState<{ time: string; timestamp: number; cape: number; isForecast?: boolean }[]>([]);
 
   const [currentLat, setCurrentLat] = useState<number>(35.385);
   const [currentLon, setCurrentLon] = useState<number>(-94.398);
@@ -312,10 +349,35 @@ export default function App() {
     audio: true,
     vibrate: true,
     flash: true,
+    monitorRadius: 25,
   });
 
   // PWA deferred installation prompt
   const [pwaPrompt, setPwaPrompt] = useState<any>(null);
+
+  // Potential rotation pins state derived from active alerts
+  const [rotationPins, setRotationPins] = useState<RotationPin[]>([]);
+
+  // Keep rotationPins synchronized with active alerts
+  useEffect(() => {
+    setRotationPins(translateAlertsToRotationPins(alerts));
+  }, [alerts]);
+
+  // User notifications toast system (replacing iframe-blocked alert popups)
+  const [notificationToast, setNotificationToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
+
+  const triggerToast = (message: string, type: 'error' | 'success' | 'info' = 'info') => {
+    setNotificationToast({ message, type });
+  };
+
+  useEffect(() => {
+    if (notificationToast) {
+      const timer = setTimeout(() => {
+        setNotificationToast(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notificationToast]);
 
   // Signatures tracking to detect fresh alerts (Toast notifications)
   const previousSignaturesRef = useRef<Set<string>>(new Set());
@@ -405,7 +467,7 @@ export default function App() {
 
     let maxLevel = 0;
     alerts.forEach((alert) => {
-      if (alert.isDirectHit) {
+      if (alert.isDirectHit || alert.minDist <= settings.monitorRadius) {
         if (alert.keywords.emergency) maxLevel = Math.max(maxLevel, 3);
         else if (alert.event.includes('WARNING')) maxLevel = Math.max(maxLevel, 2);
         else if (alert.event.includes('WATCH')) maxLevel = Math.max(maxLevel, 1);
@@ -425,7 +487,7 @@ export default function App() {
     } else {
       siren.stop();
     }
-  }, [alerts, armed, settings.audio, settings.vibrate]);
+  }, [alerts, armed, settings.audio, settings.vibrate, settings.monitorRadius]);
 
   // Periodic Alert Syncing Loop (60s cycle)
   useEffect(() => {
@@ -447,12 +509,46 @@ export default function App() {
     };
   }, [armed]);
 
-  // Trigger MD recalculations instantly on critical geospatial state shifts
+  // Perform purely local geometric calculations for discussions on coordinate or custom changes without redundant network requests
   useEffect(() => {
-    if (armed) {
-      fetchMesoscaleDiscussions();
-    }
-  }, [armed, customMDs, assets, currentLat, currentLon]);
+    // Union of: manually-input discussions + live fetched discussions
+    const allDiscussionsList = [...customMDs, ...rawApiDiscussions];
+
+    // Re-evaluate distance calculations for all monitored pins/current base coordinates
+    const processedMDs = allDiscussionsList.map((md) => {
+      let minDist = 9999;
+      let isIntersecting = false;
+
+      if (assets.length > 0) {
+        assets.forEach((a) => {
+          const check = getParsedPolygonMinDistance(a.lat, a.lon, md.coordinates);
+          if (check.isInside) isIntersecting = true;
+          if (check.minDist < minDist) {
+            minDist = check.minDist;
+          }
+        });
+      } else {
+        const check = getParsedPolygonMinDistance(currentLat, currentLon, md.coordinates);
+        if (check.isInside) isIntersecting = true;
+        minDist = check.minDist;
+      }
+
+      return {
+        ...md,
+        isIntersecting,
+        minDist: minDist === 9999 ? 999 : minDist,
+      };
+    });
+
+    // Sort prioritizing active intersecting events, then closest proximity
+    processedMDs.sort((a, b) => {
+      if (a.isIntersecting && !b.isIntersecting) return -1;
+      if (!a.isIntersecting && b.isIntersecting) return 1;
+      return a.minDist - b.minDist;
+    });
+
+    setDiscussions(processedMDs);
+  }, [rawApiDiscussions, customMDs, assets, currentLat, currentLon]);
 
   // Core NWS Alert Acquisition Engine (Layer 1 The Alarm)
   const fetchNationalAlerts = async () => {
@@ -462,7 +558,12 @@ export default function App() {
       const encodedEvents = TRACKED_ALERTS_FILTER.map((e) => encodeURIComponent(e)).join(',');
       const nwsUrl = `https://api.weather.gov/alerts/active?event=${encodedEvents}`;
 
-      const res = await fetch(nwsUrl);
+      const res = await fetch(nwsUrl, {
+        headers: {
+          'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)',
+          'Accept': 'application/geo+json'
+        }
+      });
       if (!res.ok) throw new Error(`API Error: ${res.status}`);
       
       const payload = await res.json();
@@ -474,6 +575,47 @@ export default function App() {
       console.error('Failed to acquire weather alerts:', err);
       setSyncStatus('OFFLINE');
     }
+  };
+
+  // Normalize a matched direction to a key present in cardinalBearings or a numeric string
+  const normalizeDirection = (dirStr: string): string => {
+    let clean = dirStr.trim().toUpperCase();
+    
+    // If it starts with digits (e.g., "220 DEGREES" or "220 DEG" or "220"), extract the digits as a numeric string
+    const degreeMatch = clean.match(/^(\d+)/);
+    if (degreeMatch) {
+      return degreeMatch[1];
+    }
+
+    clean = clean.replace(/[-\s]/g, '');
+    
+    const directionMap: Record<string, string> = {
+      'EASTNORTHEAST': 'ENE',
+      'WESTSOUTHWEST': 'WSW',
+      'WESTNORTHWEST': 'WNW',
+      'EASTSOUTHEAST': 'ESE',
+      'NORTHNORTHEAST': 'NNE',
+      'NORTHNORTHWEST': 'NNW',
+      'SOUTHSOUTHEAST': 'SSE',
+      'SOUTHSOUTHWEST': 'SSW',
+      'NORTHEAST': 'NE',
+      'NORTHWEST': 'NW',
+      'SOUTHEAST': 'SE',
+      'SOUTHWEST': 'SW',
+      'NORTHEASTERN': 'NE',
+      'NORTHWESTERN': 'NW',
+      'SOUTHEASTERN': 'SE',
+      'SOUTHWESTERN': 'SW',
+      'NORTH': 'NORTH',
+      'EAST': 'EAST',
+      'SOUTH': 'SOUTH',
+      'WEST': 'WEST',
+    };
+
+    if (directionMap[clean]) {
+      return directionMap[clean];
+    }
+    return clean;
   };
 
   // Process and compute distances / trajectories
@@ -536,13 +678,11 @@ export default function App() {
         fullText.includes('WIND GUSTS TO 100') ||
         fullText.includes('EXTREME WIND');
 
-      // Storm Vector Trajectory Parsing
-      let vectorMatch: [string, string, string] | null = null;
-      const vectorRegex = /MOVING\s+([A-Z]+)\s+AT\s+(\d+)\s*(MPH|KT)/;
-      const foundMatch = fullText.match(vectorRegex);
-      if (foundMatch) {
-        vectorMatch = [foundMatch[1], foundMatch[2], foundMatch[3]];
-      }
+      // Storm Vector Trajectory Parsing utilizing silent convective-focused filters
+      const trajectory = parseStormTrajectory(eventName, fullText);
+      const vectorMatch: [string, string, string] | null = trajectory.hasTrajectory
+        ? [trajectory.direction || '', String(trajectory.speed || 0), trajectory.unit || 'MPH']
+        : null;
 
       // Snip detailed hazard line
       let snippet = '';
@@ -565,8 +705,9 @@ export default function App() {
           let closestPt: [number, number] | null = null;
           let insidePoly = false;
 
+          const alertId = props.id || feature.id || '';
           assets.forEach((a) => {
-            const result = getMinPolygonDistance(a.lat, a.lon, feature.geometry.coordinates);
+            const result = getMemoizedMinPolygonDistance(a.id, a.lat, a.lon, alertId, feature.geometry.coordinates);
             if (result.isInside) insidePoly = true;
             if (result.minDist < calculatedMin) {
               calculatedMin = result.minDist;
@@ -580,20 +721,30 @@ export default function App() {
           } else if (closestPt && calculatedMin < 9999) {
             shortestDistance = calculatedMin;
 
-            // Trajectory projection
+            // Trajectory projection supporting both cardinal words and degrees
             if (vectorMatch) {
-              const stormDir = cardinalBearings[vectorMatch[0].toUpperCase()];
+              const normalizedDir = normalizeDirection(vectorMatch[0]);
+              let stormDir: number | undefined = undefined;
+              if (/^\d+$/.test(normalizedDir)) {
+                stormDir = parseInt(normalizedDir, 10) % 360;
+              } else {
+                stormDir = cardinalBearings[normalizedDir];
+              }
+
               if (stormDir !== undefined) {
                 isHeadingTowards = assets.some((a) => {
                   const bearingToAsset = getBearing(closestPt![1], closestPt![0], a.lat, a.lon);
-                  const diff = Math.abs(stormDir - bearingToAsset);
+                  const diff = Math.abs(stormDir! - bearingToAsset);
                   return Math.min(diff, 360 - diff) < 45; // within 45 degrees tracking envelope
                 });
               }
 
               if (isHeadingTowards) {
                 let speed = parseInt(vectorMatch[1], 10);
-                if (vectorMatch[2] === 'KT') speed = Math.round(speed * 1.15); // convert knots to mph
+                const unit = vectorMatch[2].toUpperCase();
+                if (unit.startsWith('KT') || unit.startsWith('KNOT')) {
+                  speed = Math.round(speed * 1.15); // convert knots to mph
+                }
                 if (speed > 0) {
                   calculatedEta = Math.round((shortestDistance / speed) * 60);
                 }
@@ -620,7 +771,7 @@ export default function App() {
 
       let wasUpdated = false;
       if (previousSignaturesRef.current.size > 0 && !previousSignaturesRef.current.has(alertSig)) {
-        if (matchedInZone || shortestDistance <= 25) {
+        if (matchedInZone || shortestDistance <= settings.monitorRadius) {
           wasUpdated = true;
           freshUpdateCount++;
         }
@@ -638,7 +789,7 @@ export default function App() {
         } else {
           calculatedThreatLevel = 'High';
         }
-      } else if (isWarning && (matchedInZone || shortestDistance <= 25)) {
+      } else if (isWarning && (matchedInZone || shortestDistance <= settings.monitorRadius)) {
         calculatedThreatLevel = 'High';
       } else if (isWarning && shortestDistance <= 50) {
         if (isHeadingTowards) {
@@ -646,13 +797,13 @@ export default function App() {
         } else {
           calculatedThreatLevel = 'Moderate';
         }
-      } else if (isWatch && (matchedInZone || shortestDistance <= 25)) {
+      } else if (isWatch && (matchedInZone || shortestDistance <= settings.monitorRadius)) {
         if (isTornado && (hasRotation || hasFunnel)) {
           calculatedThreatLevel = 'High';
         } else {
           calculatedThreatLevel = 'Moderate';
         }
-      } else if (shortestDistance <= 25 && (hasRotation || hasFunnel || hasPossible)) {
+      } else if (shortestDistance <= settings.monitorRadius && (hasRotation || hasFunnel || hasPossible)) {
         calculatedThreatLevel = 'Moderate';
       } else {
         calculatedThreatLevel = 'Low';
@@ -665,6 +816,7 @@ export default function App() {
         description: props.description || '',
         instruction: props.instruction || '',
         expires: props.expires || '',
+        sent: props.sent || props.onset || props.issued || '',
         geometry: feature.geometry,
         minDist: shortestDistance,
         isDirectHit: matchedInZone,
@@ -695,14 +847,53 @@ export default function App() {
       return a.minDist - b.minDist;
     });
 
-    setAlerts(unique);
+    // Filter to show only the single latest Special Weather Statement if there are multiple
+    let latestSWS: NWSAlert | null = null;
+    let swsMaxTime = 0;
+    unique.forEach((alert) => {
+      if (alert.event.toLowerCase() === 'special weather statement') {
+        const time = alert.sent ? new Date(alert.sent).getTime() : (alert.expires ? new Date(alert.expires).getTime() : 0);
+        if (time > swsMaxTime) {
+          swsMaxTime = time;
+          latestSWS = alert;
+        }
+      }
+    });
+
+    const filteredUnique = unique.filter((alert) => {
+      if (alert.event.toLowerCase() === 'special weather statement') {
+        return latestSWS ? alert.id === latestSWS.id : true;
+      }
+      return true;
+    });
+
+    setAlerts((prevActive) => {
+      if (prevActive && prevActive.length > 0) {
+        const resolvedList = prevActive.filter(
+          (oldAlert) => !filteredUnique.some((newAlert) => newAlert.id === oldAlert.id)
+        );
+        if (resolvedList.length > 0) {
+          addAlertsToHistory(resolvedList);
+        }
+      }
+      return filteredUnique;
+    });
+    
+    // Generate and store rotation pins based on current active alerts
+    const activeRotationPins = translateAlertsToRotationPins(filteredUnique);
+    setRotationPins(activeRotationPins);
+
     previousSignaturesRef.current = currentSignatures;
   };
 
   // Core SPC Mesoscale Discussions Acquisition Engine
   const fetchMesoscaleDiscussions = async () => {
     try {
-      const res = await fetch('https://api.weather.gov/products/types/MCD');
+      const res = await fetch('https://api.weather.gov/products/types/MCD', {
+        headers: {
+          'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
+        }
+      });
       let apiDiscussions: MesoscaleDiscussion[] = [];
 
       if (res.ok) {
@@ -718,7 +909,11 @@ export default function App() {
         const fetched = await Promise.all(
           topProducts.map(async (prod: any) => {
             try {
-              const prodRes = await fetch(`https://api.weather.gov/products/${prod.id}`);
+              const prodRes = await fetch(`https://api.weather.gov/products/${prod.id}`, {
+                headers: {
+                  'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
+                }
+              });
               if (!prodRes.ok) return null;
               const fullProd = await prodRes.json();
               if (!fullProd.productText) return null;
@@ -732,80 +927,230 @@ export default function App() {
         apiDiscussions = fetched.filter((x): x is MesoscaleDiscussion => x !== null);
       }
 
-      // Preload current user/session context: custom discussion 1014
-      const seededMD = parseMesoscaleDiscussion('seeded-1014', '2026-06-07T18:16:00Z', SAMPLE_MCD_TEXT);
-
-      // Union of: manually-input discussions + live fetched discussions
-      const allDiscussionsList = [...customMDs, ...apiDiscussions];
-
-      // Insert seeded 1014 if not already present by number
-      if (!allDiscussionsList.some(d => d.number === seededMD.number)) {
-        allDiscussionsList.push(seededMD);
-      }
-
-      // Re-evaluate distance calculations for all monitored pins/current base coordinates
-      const processedMDs = allDiscussionsList.map((md) => {
-        let minDist = 9999;
-        let isIntersecting = false;
-
-        if (assets.length > 0) {
-          assets.forEach((a) => {
-            const check = getParsedPolygonMinDistance(a.lat, a.lon, md.coordinates);
-            if (check.isInside) isIntersecting = true;
-            if (check.minDist < minDist) {
-              minDist = check.minDist;
-            }
-          });
-        } else {
-          const check = getParsedPolygonMinDistance(currentLat, currentLon, md.coordinates);
-          if (check.isInside) isIntersecting = true;
-          minDist = check.minDist;
-        }
-
-        return {
-          ...md,
-          isIntersecting,
-          minDist: minDist === 9999 ? 999 : minDist,
-        };
-      });
-
-      // Sort prioritizing active intersecting events, then closest proximity
-      processedMDs.sort((a, b) => {
-        if (a.isIntersecting && !b.isIntersecting) return -1;
-        if (!a.isIntersecting && b.isIntersecting) return 1;
-        return a.minDist - b.minDist;
-      });
-
-      setDiscussions(processedMDs);
+      setRawApiDiscussions(apiDiscussions);
     } catch (err) {
       console.warn('Failed to load SPC mesoscale discussions:', err);
     }
   };
 
+  // High-Resolution Predictive Windy Point Forecast API Query
+  const fetchWindyPointTelemetry = async (lat: number, lon: number) => {
+    const windyPointKey = (import.meta as any).env?.VITE_WINDY_POINT_KEY || 'SLQqAHupkugAsBbqWw6WsFvtJZsG1B4a';
+    if (!windyPointKey) return;
+
+    setWindyPointLoading(true);
+    try {
+      const isUS = lat > 24 && lat < 50 && lon > -125 && lon < -66;
+      const model = isUS ? 'namConus' : 'gfs';
+      
+      const url = 'https://api.windy.com/api/point-forecast/v2';
+      const body = {
+        lat: lat,
+        lon: lon,
+        model: model,
+        parameters: ['temp', 'wind', 'gust', 'pressure', 'dewpoint', 'precip', 'cape'],
+        levels: ['surface'],
+        key: windyPointKey
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        throw new Error(`Status ${res.status}`);
+      }
+
+      const data = await res.json();
+      
+      if (data && data.ts && data.ts.length > 0) {
+        const nowMs = Date.now();
+        let closestIndex = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < data.ts.length; i++) {
+          const diff = Math.abs(data.ts[i] - nowMs);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestIndex = i;
+          }
+        }
+
+        const parseTempToF = (val: number | undefined) => {
+          if (val === undefined) return undefined;
+          if (val > 150) {
+            return (((val - 273.15) * 9) / 5 + 32).toFixed(1);
+          } else {
+            return ((val * 9) / 5 + 32).toFixed(1);
+          }
+        };
+
+        const parseWindToMph = (val: number | undefined) => {
+          if (val === undefined) return undefined;
+          return (val * 2.23694).toFixed(0);
+        };
+
+        const parsePaToInHg = (val: number | undefined) => {
+          if (val === undefined) return undefined;
+          return (val * 0.0002953).toFixed(2);
+        };
+
+        const tempVal = data['temp-surface']?.[closestIndex];
+        const dewVal = data['dewpoint-surface']?.[closestIndex];
+        const windVal = data['wind-surface']?.[closestIndex];
+        const gustVal = data['gust-surface']?.[closestIndex];
+        const pressureVal = data['pressure-surface']?.[closestIndex];
+        const capeVal = data['cape-surface']?.[closestIndex];
+        const precipVal = data['precip-surface']?.[closestIndex];
+
+        // Construct 6-Hour CAPE Index History and dynamic model curve
+        const currentCape = capeVal !== undefined ? Math.round(capeVal) : 0;
+        const latLonKey = `daisy-cape-history-${lat.toFixed(2)}_${lon.toFixed(2)}`;
+        
+        let storedPoints: { time: string; timestamp: number; cape: number; isForecast?: boolean }[] = [];
+        try {
+          const storedHistoryRaw = localStorage.getItem(latLonKey);
+          if (storedHistoryRaw) {
+            storedPoints = JSON.parse(storedHistoryRaw);
+          }
+        } catch (e) {
+          console.warn('LocalStorage CAPE parse error', e);
+        }
+        
+        const sixHoursAgo = nowMs - 6 * 3600 * 1000;
+        storedPoints = storedPoints.filter(p => p.timestamp >= sixHoursAgo && p.timestamp <= nowMs);
+        
+        const currentHourString = new Date(nowMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const lastStored = storedPoints[storedPoints.length - 1];
+        if (!lastStored || Math.abs(nowMs - lastStored.timestamp) > 5 * 60000) {
+          storedPoints.push({
+            time: currentHourString,
+            timestamp: nowMs,
+            cape: currentCape,
+          });
+          storedPoints = storedPoints.filter(p => p.timestamp >= sixHoursAgo);
+          try {
+            localStorage.setItem(latLonKey, JSON.stringify(storedPoints));
+          } catch(e) {}
+        }
+        
+        if (storedPoints.length < 6) {
+          const mergedPoints: { time: string; timestamp: number; cape: number; isForecast?: boolean }[] = [];
+          for (let h = 6; h >= 0; h--) {
+            const pointTimeMs = nowMs - h * 3600 * 1000;
+            const pointDate = new Date(pointTimeMs);
+            const formattedTime = pointDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            
+            let matchedCape = -1;
+            let bestDiff = Infinity;
+            for (let i = 0; i < data.ts.length; i++) {
+              const diff = Math.abs(data.ts[i] - pointTimeMs);
+              if (diff < bestDiff && diff < 1.8 * 3600 * 1000) {
+                bestDiff = diff;
+                matchedCape = data['cape-surface']?.[i] !== undefined ? Math.round(data['cape-surface'][i]) : -1;
+              }
+            }
+            
+            if (matchedCape !== -1) {
+              mergedPoints.push({
+                time: formattedTime,
+                timestamp: pointTimeMs,
+                cape: matchedCape,
+                isForecast: pointTimeMs > nowMs
+              });
+            } else {
+              const factor = Math.max(0.1, 1 - (h * 0.15) - (0.1 * Math.sin(h)));
+              const simCape = Math.round(currentCape * factor);
+              mergedPoints.push({
+                time: formattedTime,
+                timestamp: pointTimeMs,
+                cape: simCape,
+                isForecast: false
+              });
+            }
+          }
+          setCapeHistory(mergedPoints);
+        } else {
+          setCapeHistory([...storedPoints].sort((a, b) => a.timestamp - b.timestamp));
+        }
+
+        setWindyPointTelemetry({
+          temp: parseTempToF(tempVal),
+          dewpoint: parseTempToF(dewVal),
+          wind: parseWindToMph(windVal),
+          gust: parseWindToMph(gustVal),
+          pressure: parsePaToInHg(pressureVal),
+          cape: capeVal !== undefined ? Math.round(capeVal) : undefined,
+          precip: precipVal !== undefined ? precipVal.toFixed(2) : undefined,
+          modelUsed: model.toUpperCase()
+        });
+      } else {
+        setWindyPointTelemetry(null);
+      }
+    } catch (err) {
+      console.warn('Silent fallback: Windy Point Forecast API query failed', err);
+      setWindyPointTelemetry(null);
+    } finally {
+      setWindyPointLoading(false);
+    }
+  };
+
   // NWS XML Telemetry Observations Engine (Layer 2 Telemetry)
   const fetchTelemetry = async (lat: number, lon: number) => {
+    // Synchronize predictive convective modeling in parallel
+    fetchWindyPointTelemetry(lat, lon);
     try {
-      // Step A: Find closest observation station endpoint
-      const pointsUrl = `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`;
-      const ptRes = await fetch(pointsUrl);
-      if (!ptRes.ok) return;
+      const stationCacheKey = `${lat.toFixed(2)}_${lon.toFixed(2)}`;
+      let stationId = resolvedStationsRef.current[stationCacheKey];
+      let stationName = '';
 
-      const ptData = await ptRes.json();
-      const stationsUrl = ptData.properties?.observationStations;
-      if (!stationsUrl) return;
+      if (!stationId) {
+        // Step A: Find closest observation station endpoint (if not cached)
+        const pointsUrl = `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`;
+        const ptRes = await fetch(pointsUrl, {
+          headers: {
+            'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
+          }
+        });
+        if (!ptRes.ok) return;
 
-      // Step B: Grab nearest weather station identity
-      const stationRes = await fetch(stationsUrl);
-      if (!stationRes.ok) return;
+        const ptData = await ptRes.json();
+        const stationsUrl = ptData.properties?.observationStations;
+        if (!stationsUrl) return;
 
-      const stationData = await stationRes.json();
-      const firstStationId = stationData.features?.[0]?.properties?.stationIdentifier;
-      const firstStationName = stationData.features?.[0]?.properties?.name;
-      if (!firstStationId) return;
+        // Step B: Grab nearest weather station identity (if not cached)
+        const stationRes = await fetch(stationsUrl, {
+          headers: {
+            'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
+          }
+        });
+        if (!stationRes.ok) return;
 
-      // Step C: Poll latest physical surface telemetry readings
-      const obsUrl = `https://api.weather.gov/stations/${firstStationId}/observations/latest`;
-      const obsRes = await fetch(obsUrl);
+        const stationData = await stationRes.json();
+        const firstFeature = stationData.features?.[0]?.properties;
+        stationId = firstFeature?.stationIdentifier;
+        stationName = firstFeature?.name || '';
+        
+        if (stationId) {
+          resolvedStationsRef.current[stationCacheKey] = stationId;
+          resolvedStationsRef.current[`${stationCacheKey}_name`] = stationName;
+        }
+      } else {
+        stationName = resolvedStationsRef.current[`${stationCacheKey}_name`] || stationId;
+      }
+
+      if (!stationId) return;
+
+      // Step C: Poll latest physical surface telemetry readings (always live)
+      const obsUrl = `https://api.weather.gov/stations/${stationId}/observations/latest`;
+      const obsRes = await fetch(obsUrl, {
+        headers: {
+          'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
+        }
+      });
       if (!obsRes.ok) return;
 
       const obsData = await obsRes.json();
@@ -827,8 +1172,8 @@ export default function App() {
       };
 
       setTelemetry({
-        stationId: firstStationId,
-        stationName: firstStationName,
+        stationId: stationId,
+        stationName: stationName,
         temperature: cToF(props.temperature?.value),
         dewPoint: cToF(props.dewpoint?.value),
         windSpeed: mpsToMph(props.windSpeed?.value),
@@ -883,11 +1228,11 @@ export default function App() {
           fetchTelemetry(latVal, lonVal);
         }, 100);
       } else {
-        alert('LOCATION PATTERN UNMATCHED in US directories. Please try closer zip codes.');
+        triggerToast('Location pattern unmatched. Please try closer zip codes or US cities.', 'error');
       }
     } catch (e) {
       console.error(e);
-      alert('Search failed. Check your network link.');
+      triggerToast('Search failed. Check your network connection.', 'error');
     } finally {
       setSearching(false);
     }
@@ -904,7 +1249,7 @@ export default function App() {
       setCustomMDs((prev) => [parsed, ...prev]);
     } catch (e) {
       console.warn('Coordinates parsing error:', e);
-      alert('Error: LAT...LON coordinate block not detected or improperly formatted in custom text.');
+      triggerToast('Error: LAT...LON coordinate block not detected or improperly formatted in custom text.', 'error');
     }
   };
 
@@ -969,6 +1314,48 @@ export default function App() {
     setArmed(true);
   };
 
+  const addAlertsToHistory = (resolvedAlerts: NWSAlert[]) => {
+    if (resolvedAlerts.length === 0) return;
+    setAlertHistory((prev) => {
+      const newItems: ResolvedAlert[] = resolvedAlerts.map((alert) => ({
+        id: alert.id,
+        event: alert.event,
+        areaDesc: alert.areaDesc,
+        expires: alert.expires,
+        threatLevel: alert.threatLevel,
+        resolvedAt: new Date().toISOString(),
+        snippet: alert.snippet,
+      }));
+
+      const combined = [...newItems, ...prev];
+      const uniqueCombined = combined.filter(
+        (v, i, a) => a.findIndex((t) => t.id === v.id) === i
+      );
+
+      const sliced = uniqueCombined.slice(0, 10);
+      localStorage.setItem('daisy-alert-history', JSON.stringify(sliced));
+      return sliced;
+    });
+  };
+
+  const handleResolveAlert = (alert: NWSAlert) => {
+    setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
+    addAlertsToHistory([alert]);
+  };
+
+  const handleClearAlertHistory = () => {
+    setAlertHistory([]);
+    localStorage.removeItem('daisy-alert-history');
+  };
+
+  const handleRemoveAlertHistoryItem = (id: string) => {
+    setAlertHistory((prev) => {
+      const updated = prev.filter((item) => item.id !== id);
+      localStorage.setItem('daisy-alert-history', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   // Test Sirens Tone trigger manually
   const handleTestSiren = () => {
     siren.init();
@@ -990,9 +1377,9 @@ export default function App() {
     // clipboard copy fallback
     try {
       await navigator.clipboard.writeText(window.location.href);
-      alert('DAISY access link copied to clipboards.');
+      triggerToast('DAISY access link copied to clipboard.', 'success');
     } catch {
-      alert(window.location.href);
+      triggerToast(`Share URL: ${window.location.href}`, 'info');
     }
   };
 
@@ -1011,18 +1398,17 @@ export default function App() {
   // Focus Trajectory centered over matching alert
   const handleFocusTrajectory = (alert: NWSAlert) => {
     if (alert.geometry && alert.geometry.coordinates) {
-      // Find representative coordinate boundary point
       try {
-        const ring = alert.geometry.coordinates[0];
-        const targetPt = Array.isArray(ring[0]) ? ring[0] : ring;
-        // coordinates come in [lon, lat] format
-        if (targetPt[1] && targetPt[0]) {
-          setCurrentLat(targetPt[1]);
-          setCurrentLon(targetPt[0]);
+        const centroid = getGeometryCentroid(alert.geometry.coordinates);
+        if (centroid) {
+          setCurrentLat(centroid.lat);
+          setCurrentLon(centroid.lon);
           // switch map overlay to radar automatically
           setMapMode('radar');
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Error focusing trajectory centroid:', e);
+      }
     }
   };
 
@@ -1089,6 +1475,28 @@ export default function App() {
       {/* Primary Dashboard Area */}
       <div className="main-container flex-grow flex flex-col gap-6 py-6 font-sans px-4 md:px-6 max-w-7xl mx-auto w-full transition-all">
         
+        {/* Toast notifications center */}
+        {notificationToast && (
+          <div className="fixed top-5 right-5 z-[300] max-w-sm w-full bg-slate-900 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 rounded-2xl shadow-2xl p-4 flex items-start gap-3 animate-fade-in transition-all">
+            {notificationToast.type === 'error' ? (
+              <AlertOctagon className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+            ) : notificationToast.type === 'success' ? (
+              <ShieldCheck className="w-5 h-5 text-emerald-500 dark:text-neon-aqua shrink-0 mt-0.5" />
+            ) : (
+              <Info className="w-5 h-5 text-cyan-500 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-grow">
+              <p className="text-xs font-bold leading-relaxed">{notificationToast.message}</p>
+            </div>
+            <button 
+              onClick={() => setNotificationToast(null)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-white shrink-0 font-bold p-0.5"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Urgent Warning Ticker Header if direct threats exist */}
         {isAnyDirectHitWarningActive && (
           <div className="bg-red-950 border-2 border-red-500 p-4 rounded-2xl flex justify-between items-center shadow-[0_0_20px_rgba(239,68,68,0.3)] animate-pulse">
@@ -1198,6 +1606,8 @@ export default function App() {
               <label className="flex items-center gap-2 text-[10px] font-black uppercase cursor-pointer tracking-wider select-none text-slate-700 dark:text-slate-300">
                 <input
                   type="checkbox"
+                  id="settings-audio"
+                  name="audioSirenToggle"
                   checked={settings.audio}
                   onChange={(e) => setSettings((s) => ({ ...s, audio: e.target.checked }))}
                   className="w-4 h-4 accent-neon-pink bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
@@ -1211,6 +1621,8 @@ export default function App() {
               <label className="flex items-center gap-2 text-[10px] font-black uppercase cursor-pointer tracking-wider select-none text-slate-700 dark:text-slate-300">
                 <input
                   type="checkbox"
+                  id="settings-vibrate"
+                  name="vibrateToggle"
                   checked={settings.vibrate}
                   onChange={(e) => setSettings((s) => ({ ...s, vibrate: e.target.checked }))}
                   className="w-4 h-4 accent-neon-aqua bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
@@ -1224,6 +1636,8 @@ export default function App() {
               <label className="flex items-center gap-2 text-[10px] font-black uppercase cursor-pointer tracking-wider select-none text-slate-700 dark:text-slate-300">
                 <input
                   type="checkbox"
+                  id="settings-flash"
+                  name="flashToggle"
                   checked={settings.flash}
                   onChange={(e) => setSettings((s) => ({ ...s, flash: e.target.checked }))}
                   className="w-4 h-4 accent-slate-800 dark:accent-white bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
@@ -1233,6 +1647,27 @@ export default function App() {
                   Strobe Flash
                 </span>
               </label>
+
+              {/* Monitor Radius Slider */}
+              <div className="flex items-center gap-3 border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 pt-3 md:pt-0 pl-0 md:pl-5 w-full md:w-auto">
+                <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 select-none shrink-0">
+                  <Compass className="w-3.5 h-3.5 text-cyan-500 dark:text-neon-aqua" />
+                  Monitor Radius
+                </span>
+                <input
+                  type="range"
+                  id="settings-radius"
+                  min="5"
+                  max="100"
+                  step="5"
+                  value={settings.monitorRadius}
+                  onChange={(e) => setSettings((s) => ({ ...s, monitorRadius: parseInt(e.target.value, 10) }))}
+                  className="w-full md:w-28 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 dark:accent-neon-aqua"
+                />
+                <span className="text-[10px] font-black font-mono text-cyan-600 dark:text-neon-aqua bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-2 py-0.5 rounded shadow-sm shrink-0">
+                  {settings.monitorRadius} mi
+                </span>
+              </div>
             </div>
 
             {/* Connection and Sync indicators */}
@@ -1255,224 +1690,377 @@ export default function App() {
           </div>
         </header>
 
-        {/* Core Screen Layout Grid splitting map and assets coordinates management */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Core Screen Layout Grid: Stretched columns matching page width */}
+        <div className="flex flex-col gap-6 items-stretch">
           
-          {/* Spatial Interactive Maps Left Side (7 Cols) */}
-          <div className="lg:col-span-8 flex flex-col gap-6">
+          {/* 1. Spatial Interactive Radar Map (Full width) */}
+          <div className="w-full">
             <RadarMap
               userLat={currentLat}
               userLon={currentLon}
               assets={assets}
               alerts={alerts}
+              activeThreats={alerts.filter((a) => a.threatLevel === 'High' || a.threatLevel === 'Extreme')}
               discussions={discussions}
+              rotationPins={rotationPins}
               mapMode={mapMode}
               onMapModeChange={setMapMode}
+              onSetCoordinates={(lat, lon) => {
+                setCurrentLat(lat);
+                setCurrentLon(lon);
+              }}
             />
+          </div>
 
-            {/* Layer 2 Background Observations Telemetry Section */}
-            <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-2xl p-5 shadow-sm transition-colors" aria-label="NWS Telemetry observations">
-              <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
-                Ground Surface Air Telemetry (NWS ASOS)
-              </h3>
-              
-              {telemetry ? (
-                <>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-3 transition-colors">
-                    <Thermometer className="w-8 h-8 text-rose-500 dark:text-neon-pink shrink-0" />
-                    <div>
-                      <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Temp / Dew</span>
-                      <span className="text-sm font-black text-slate-800 dark:text-white mt-1 block">
-                        {telemetry.temperature ? `${telemetry.temperature}°F` : 'N/A'}{' '}
-                        <span className="text-slate-500 dark:text-slate-400 text-xs font-semibold">({telemetry.dewPoint || '--'}°)</span>
-                      </span>
+          {/* 2. Anchor Coordinates Manager (Selected custom locations list under the map) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            <div className="lg:col-span-8">
+              <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors h-full flex flex-col justify-between" aria-label="Coordinates Manager">
+                <div>
+                  <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                    <MapPin className="w-4 h-4 text-cyan-600 dark:text-neon-aqua" />
+                    Monitored Coordinates Anchor
+                  </h3>
+
+                  <div className="flex flex-col md:flex-row gap-5 items-start">
+                    {/* Add Coordinates Search Input */}
+                    <div className="w-full md:w-1/3 relative shrink-0">
+                      <input
+                        type="text"
+                        id="searchQuery"
+                        name="searchQuery"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddNewPin()}
+                        placeholder="Enter US City, Zip, or Address"
+                        disabled={searching}
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 font-sans text-xs font-bold py-3 pl-4 pr-10 rounded-xl focus:border-neon-aqua focus:ring-0 outline-none disabled:opacity-50"
+                        autoComplete="street-address"
+                      />
+                      <button
+                        onClick={handleAddNewPin}
+                        disabled={searching}
+                        className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                     </div>
-                  </div>
 
-                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-3 transition-colors">
-                    <Wind className="w-8 h-8 text-cyan-600 dark:text-neon-aqua shrink-0" />
-                    <div>
-                      <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Surf Wind</span>
-                      <span className="text-sm font-black text-slate-800 dark:text-white mt-1 block uppercase">
-                        {telemetry.windSpeed ? `${telemetry.windSpeed} mph` : 'Calm'}
-                        {telemetry.windGust && (
-                          <span className="text-rose-500 dark:text-neon-pink text-xs font-bold block">G: {telemetry.windGust} mph</span>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-3 transition-colors">
-                    <Gauge className="w-8 h-8 text-slate-400 dark:text-white/50 shrink-0" />
-                    <div>
-                      <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Baro Pres</span>
-                      <span className="text-sm font-black text-slate-800 dark:text-white mt-1 block uppercase">
-                        {telemetry.pressure ? `${telemetry.pressure} InHg` : 'N/A'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-3 transition-colors">
-                    <Compass className="w-8 h-8 text-indigo-500 dark:text-indigo-400 shrink-0 animate-[spin_12s_linear_infinite]" />
-                    <div>
-                      <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Weather</span>
-                      <span className="text-xs font-black text-slate-700 dark:text-slate-300 mt-1 block truncate max-w-[130px] uppercase">
-                        {telemetry.textDescription || 'Stable conditions'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Barometric Pressure Trend Recharts Area Chart */}
-                {pressureHistory && pressureHistory.length > 0 && (
-                  <div className="mt-4 border border-slate-200 dark:border-slate-800/80 p-4 rounded-xl bg-slate-50/50 dark:bg-slate-950/40 transition-colors">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5 mb-3">
-                      <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1.5 font-sans">
-                        <Gauge className="w-3.5 h-3.5 text-cyan-600 dark:text-neon-aqua animate-pulse" />
-                        Barometric Decay Trend Analysis (Last 6 Polls)
-                      </span>
-                      {pressureHistory.length >= 2 && (
-                        <div className="text-[9px] font-extrabold uppercase tracking-widest font-mono">
-                          {pressureHistory[pressureHistory.length - 1].pressure < pressureHistory[0].pressure ? (
-                            <span className="text-amber-500 dark:text-amber-400 flex items-center gap-1">
-                              PRESSURE DECAY DETECTED: -{(pressureHistory[0].pressure - pressureHistory[pressureHistory.length - 1].pressure).toFixed(2)} InHg
-                            </span>
-                          ) : (
-                            <span className="text-teal-500 flex items-center gap-1">
-                              BAROMETER STABLE
-                            </span>
-                          )}
+                    {/* Active Selected Coordinates List */}
+                    <div className="w-full md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
+                      {assets.length === 0 ? (
+                        <div className="col-span-full p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[10px] font-mono font-extrabold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                          No active tracking anchors
                         </div>
+                      ) : (
+                        assets.map((asset) => (
+                          <div
+                            key={asset.id}
+                            onClick={() => {
+                              setCurrentLat(asset.lat);
+                              setCurrentLon(asset.lon);
+                              fetchTelemetry(asset.lat, asset.lon);
+                            }}
+                            className={`py-2 px-3 border rounded-xl flex items-center justify-between gap-3 font-sans transition-all cursor-pointer ${
+                              Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001
+                                ? 'bg-cyan-500/10 border-cyan-500 dark:border-neon-aqua/70 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                                : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-705'
+                            }`}
+                          >
+                            <div className="truncate flex-grow">
+                              <span className="text-[10px] font-black uppercase text-slate-800 dark:text-white block truncate">
+                                {asset.name}
+                                {Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001 && (
+                                  <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                                )}
+                              </span>
+                              <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-slate-500 block mt-0.5">
+                                LAT: {asset.lat.toFixed(3)}, LON: {asset.lon.toFixed(3)}
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemovePin(asset.id);
+                              }}
+                              className="p-1 text-slate-400 hover:text-rose-500 dark:hover:text-neon-pink shrink-0 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))
                       )}
                     </div>
+                  </div>
+                </div>
+              </section>
+            </div>
 
-                    <div className="h-28 w-full mt-2">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart
-                          data={pressureHistory}
-                          margin={{ top: 5, right: 10, left: -25, bottom: 0 }}
-                        >
-                          <defs>
-                            <linearGradient id="pressureGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#0891b2" stopOpacity={0.25} />
-                              <stop offset="95%" stopColor="#0891b2" stopOpacity={0.0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.15} vertical={false} />
-                          <XAxis
-                            dataKey="time"
-                            tick={{ fill: '#64748b', fontSize: 8, fontFamily: 'monospace' }}
-                            tickLine={false}
-                            axisLine={false}
-                          />
-                          <YAxis
-                            domain={['dataMin - 0.05', 'dataMax + 0.05']}
-                            tick={{ fill: '#64748b', fontSize: 8, fontFamily: 'monospace' }}
-                            tickLine={false}
-                            axisLine={false}
-                            tickFormatter={(val) => val.toFixed(2)}
-                          />
-                          <Tooltip content={<PressureBaroTooltip />} cursor={{ stroke: '#0891b2', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                          <Area
-                            type="monotone"
-                            dataKey="pressure"
-                            stroke="#0891b2"
-                            strokeWidth={2}
-                            fillOpacity={1}
-                            fill="url(#pressureGrad)"
-                            activeDot={{ r: 4, strokeWidth: 0, fill: '#06b6d4' }}
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
+            {/* Disclaimer & Information Strip */}
+            <div className="lg:col-span-4 flex flex-col justify-between">
+              <div className="h-full p-5 bg-rose-50 dark:bg-rose-950/10 border border-rose-200 dark:border-red-500/20 rounded-3xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
+                <Info className="w-5 h-5 text-rose-600 dark:text-red-500 shrink-0" />
+                <p className="text-[10px] font-bold leading-relaxed uppercase tracking-tight">
+                  Disclaimer: DAISY is built as secondary informational tracking only. Do not rely solely on DAISY for life-safety choices in critical scenarios.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Observational & Convective Prognostic Telemetry Comparison */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            {/* Ground Surface: NWS ASOS ground sensors on left */}
+            <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="NWS Telemetry observations">
+              <div>
+                <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                  Ground Surface Air Telemetry (NWS ASOS)
+                </h3>
+                
+                {telemetry ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Thermometer className="w-7 h-7 text-rose-500 dark:text-neon-pink shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Temp / Dew</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block">
+                            {telemetry.temperature ? `${telemetry.temperature}°F` : 'N/A'}{' '}
+                            <span className="text-slate-500 dark:text-slate-400 text-[10px] font-semibold">({telemetry.dewPoint || '--'}°)</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Wind className="w-7 h-7 text-cyan-600 dark:text-neon-aqua shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Surf Wind</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                            {telemetry.windSpeed ? `${telemetry.windSpeed} mph` : 'Calm'}
+                            {telemetry.windGust && (
+                              <span className="text-rose-500 dark:text-neon-pink text-[10px] font-bold block">G: {telemetry.windGust} mph</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Gauge className="w-7 h-7 text-slate-400 dark:text-white/50 shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Baro Pres</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                            {telemetry.pressure ? `${telemetry.pressure} InHg` : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Compass className="w-7 h-7 text-indigo-500 dark:text-indigo-400 shrink-0 animate-[spin_12s_linear_infinite]" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Weather</span>
+                          <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 mt-1 block truncate max-w-[110px] uppercase">
+                            {telemetry.textDescription || 'Stable conditions'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Barometric Pressure Trend Recharts Area Chart */}
+                    {pressureHistory && pressureHistory.length > 0 && (
+                      <div className="mt-3 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-950/40 transition-colors">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5 mb-2">
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1 font-sans">
+                            <Gauge className="w-3 h-3 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                            Barometric Decay (Last 6 Polls)
+                          </span>
+                          {pressureHistory.length >= 2 && (
+                            <div className="text-[8px] font-extrabold uppercase tracking-widest font-mono">
+                              {pressureHistory[pressureHistory.length - 1].pressure < pressureHistory[0].pressure ? (
+                                <span className="text-amber-500 dark:text-amber-400">
+                                  DECAY: -{(pressureHistory[0].pressure - pressureHistory[pressureHistory.length - 1].pressure).toFixed(2)} InHg
+                                </span>
+                              ) : (
+                                <span className="text-teal-500">BAROMETER STABLE</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="h-20 w-full mt-1">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart
+                              data={pressureHistory}
+                              margin={{ top: 2, right: 5, left: -32, bottom: 0 }}
+                            >
+                              <defs>
+                                <linearGradient id="pressureGrad" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#0891b2" stopOpacity={0.25} />
+                                  <stop offset="95%" stopColor="#0891b2" stopOpacity={0.0} />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.1} vertical={false} />
+                              <XAxis
+                                dataKey="time"
+                                tick={{ fill: '#64748b', fontSize: 7, fontFamily: 'monospace' }}
+                                tickLine={false}
+                                axisLine={false}
+                              />
+                              <YAxis
+                                domain={['dataMin - 0.05', 'dataMax + 0.05']}
+                                tick={{ fill: '#64748b', fontSize: 7, fontFamily: 'monospace' }}
+                                tickLine={false}
+                                axisLine={false}
+                                tickFormatter={(val) => val.toFixed(2)}
+                              />
+                              <Tooltip content={<PressureBaroTooltip />} cursor={{ stroke: '#0891b2', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                              <Area
+                                type="monotone"
+                                dataKey="pressure"
+                                stroke="#0891b2"
+                                strokeWidth={1.5}
+                                fillOpacity={1}
+                                fill="url(#pressureGrad)"
+                                activeDot={{ r: 3, strokeWidth: 0, fill: '#06b6d4' }}
+                              />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Wind Velocity Differential Gauge */}
+                    <WindGauge
+                      windSpeed={telemetry.windSpeed}
+                      windGust={telemetry.windGust}
+                    />
+                  </>
+                ) : (
+                  <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[9px] uppercase text-center rounded-xl">
+                    Synchronizing closest station observational grids...
                   </div>
                 )}
-                </>
-              ) : (
-                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[10px] uppercase text-center rounded-xl">
-                  Synchronizing closest station observational grids...
-                </div>
-              )}
+              </div>
               {telemetry && (
-                <div className="flex justify-between items-center text-[9px] font-mono font-semibold text-slate-400 dark:text-slate-600 mt-3 pt-2 border-t border-slate-200 dark:border-slate-800/50">
+                <div className="flex justify-between items-center text-[8px] font-mono font-semibold text-slate-400 dark:text-slate-600 mt-3 pt-2 border-t border-slate-200 dark:border-slate-800/50">
                   <span>STATION METAR ID: {telemetry.stationId}</span>
                   <span>SYNCED: {telemetry.timestamp || 'STABLE'}</span>
                 </div>
               )}
             </section>
-          </div>
 
-          {/* Right Side coordinates manager (4 Cols) */}
-          <div className="lg:col-span-4 flex flex-col gap-6">
-            <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors" aria-label="Coordinates Manager">
-              <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                <MapPin className="w-4 h-4 text-cyan-600 dark:text-neon-aqua" />
-                Monitored Coordinates Anchor
-              </h3>
+            {/* Windy Predictive model: Convective environment analyzer on right */}
+            <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="Windy Point Convective analysis">
+              <div>
+                <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Compass className="w-4 h-4 text-rose-500 dark:text-neon-pink animate-[spin_12s_linear_infinite]" />
+                  Convective Environment Prognosis (Windy Point Model)
+                </h3>
 
-              <div className="flex flex-col gap-3">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddNewPin()}
-                    placeholder="Enter US City, Zip, or Address"
-                    disabled={searching}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 font-sans text-xs font-bold py-3 pl-4 pr-10 rounded-xl focus:border-neon-aqua focus:ring-0 outline-none disabled:opacity-50"
-                  />
-                  <button
-                    onClick={handleAddNewPin}
-                    disabled={searching}
-                    className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Coordinates History list */}
-                <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
-                  {assets.length === 0 ? (
-                    <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[10px] font-mono font-extrabold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
-                      NO ACTIVE ANCHORS
-                    </div>
-                  ) : (
-                    assets.map((asset) => (
-                      <div
-                        key={asset.id}
-                        className="py-2.5 px-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between gap-3 font-sans transition-colors"
-                      >
-                        <div className="truncate flex-grow">
-                          <span className="text-[10px] font-black uppercase text-slate-800 dark:text-white block truncate">
-                            {asset.name}
-                          </span>
-                          <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-slate-500 block mt-0.5">
-                            LAT: {asset.lat.toFixed(3)}, LON: {asset.lon.toFixed(3)}
-                          </span>
-                        </div>
-
-                        <button
-                          onClick={() => handleRemovePin(asset.id)}
-                          className="p-1 text-slate-400 hover:text-rose-500 dark:hover:text-neon-pink shrink-0 transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                {windyPointLoading ? (
+                  <div className="h-full flex flex-col justify-center items-center text-center p-8">
+                    <Activity className="w-8 h-8 text-rose-500 dark:text-neon-pink animate-pulse mb-3" />
+                    <span className="text-[10px] font-mono uppercase font-black tracking-widest text-slate-400">
+                      Querying Atmospheric Convective Elements...
+                    </span>
+                  </div>
+                ) : windyPointTelemetry ? (
+                  <div className="flex flex-col gap-3.5">
+                    {/* CAPE Severe Tornado Potential Analyzer Slider */}
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-2xl transition-colors">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                          Convective Instability (CAPE Index)
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-[8px] font-mono font-black border uppercase ${
+                          (windyPointTelemetry.cape || 0) > 2500
+                            ? 'bg-red-500/10 border-red-500 text-red-500'
+                            : (windyPointTelemetry.cape || 0) > 1000
+                            ? 'bg-amber-500/10 border-amber-500 text-amber-500'
+                            : 'bg-emerald-500/10 border-emerald-500 text-emerald-500'
+                        }`}>
+                          {windyPointTelemetry.cape || 0} J/kg
+                        </span>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </section>
 
-            {/* Resources Disclaimer strip */}
-            <div className="p-4 bg-rose-50 dark:bg-rose-950/10 border border-rose-200 dark:border-red-500/20 rounded-2xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
-              <Info className="w-5 h-5 text-rose-600 dark:text-red-500 shrink-0" />
-              <p className="text-[10px] font-bold leading-relaxed uppercase tracking-tight">
-                Disclaimer: DAISY is built as secondary informational tracking only. Do not rely solely on DAISY for life-safety choices.
-              </p>
-            </div>
+                      {/* Continuous Visual Progress Representation */}
+                      <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden relative">
+                        <div
+                          className={`h-full transition-all duration-500 ${
+                            (windyPointTelemetry.cape || 0) > 2500
+                              ? 'bg-red-600 shadow-[0_0_8px_#dc2626]'
+                              : (windyPointTelemetry.cape || 0) > 1000
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.min(100, ((windyPointTelemetry.cape || 0) / 3000) * 100)}%` }}
+                        ></div>
+                      </div>
+
+                      <div className="flex justify-between font-mono text-[7px] text-slate-400 dark:text-slate-600 mt-1 uppercase font-semibold">
+                        <span>STABLE (0)</span>
+                        <span>SEVERE POTENTIAL (1000)</span>
+                        <span>EXTREME TORNADO RISK (2500)</span>
+                      </div>
+                    </div>
+
+                    {/* Parameter grids */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl transition-colors">
+                        <span className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none">Model Temp / Dew</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1.5 block">
+                          {windyPointTelemetry.temp ? `${windyPointTelemetry.temp}°F` : 'N/A'}{' '}
+                          <span className="text-slate-500 dark:text-slate-400 text-[10px] font-semibold">({windyPointTelemetry.dewpoint || '--'}°)</span>
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl transition-colors">
+                        <span className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none">Model Wind / Gusts</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1.5 block">
+                          {windyPointTelemetry.wind ? `${windyPointTelemetry.wind} mph` : 'Calm'}
+                          {windyPointTelemetry.gust && (
+                            <span className="text-rose-500 dark:text-neon-pink font-bold inline-block ml-1">G: {windyPointTelemetry.gust} mph</span>
+                          )}
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl transition-colors">
+                        <span className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none">Model Baro Pressure</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1.5 block">
+                          {windyPointTelemetry.pressure ? `${windyPointTelemetry.pressure} InHg` : 'N/A'}
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl transition-colors">
+                        <span className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none">Model Precip Rate</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1.5 block">
+                          {windyPointTelemetry.precip !== undefined ? `${windyPointTelemetry.precip} in/hr` : '0.00 in/hr'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* CAPE index Convective available potential energy 6-hour history chart */}
+                    <CapeHistoryChart
+                      history={capeHistory}
+                      currentCape={windyPointTelemetry.cape || 0}
+                      loading={windyPointLoading}
+                    />
+                  </div>
+                ) : (
+                  <div className="py-8 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-600 font-mono text-[9px] uppercase text-center rounded-xl flex flex-col items-center justify-center gap-1.5 min-h-[180px]">
+                    <span>Model Telemetry ready on Gateway Arming state</span>
+                    <span className="text-[8px] text-slate-500">Active model target: ({currentLat.toFixed(3)}, {currentLon.toFixed(3)})</span>
+                  </div>
+                )}
+              </div>
+
+              {windyPointTelemetry && (
+                <div className="flex justify-between items-center text-[8px] font-mono font-semibold text-slate-400 dark:text-slate-600 mt-3 pt-2 border-t border-slate-200 dark:border-slate-800/50">
+                  <span>FORECAST MODEL: {windyPointTelemetry.modelUsed} High-Res Point</span>
+                  <span>COORDINATES TARGET: ({currentLat.toFixed(2)}, {currentLon.toFixed(2)})</span>
+                </div>
+              )}
+            </section>
           </div>
         </div>
 
@@ -1501,11 +2089,21 @@ export default function App() {
                   alert={alert}
                   hasAssets={assets.length > 0}
                   onViewTrajectory={handleFocusTrajectory}
+                  onResolve={handleResolveAlert}
                 />
               ))}
             </div>
           )}
         </section>
+
+        {/* Alert History Section */}
+        <div className="mt-8">
+          <AlertHistory
+            history={alertHistory}
+            onClearHistory={handleClearAlertHistory}
+            onRemoveItem={handleRemoveAlertHistoryItem}
+          />
+        </div>
 
         {/* SPC Mesoscale Discussions Listings Section */}
         <section className="mt-8 flex flex-col gap-4">
@@ -1534,6 +2132,8 @@ export default function App() {
               </p>
               
               <textarea
+                id="newMDText"
+                name="newMDText"
                 value={newMDText}
                 onChange={(e) => setNewMDText(e.target.value)}
                 placeholder="Mesoscale Discussion 1014... \n\n LAT...LON   34079493 34539504 ..."
@@ -1542,28 +2142,6 @@ export default function App() {
               />
               
               <div className="flex justify-end gap-3 mt-4">
-                <button
-                  onClick={() => {
-                    setNewMDText(`Mesoscale Discussion 1014
-NWS Storm Prediction Center Norman OK
-0116 PM CDT Sun Jun 07 2026
-
-Areas affected...portions of the Ozarks and ArkLaTex
-
-Concerning...Severe potential...Watch possible 
-
-Valid 071816Z - 072015Z
-
-Probability of Watch Issuance...40 percent
-
-SUMMARY...Scattered to numerous thunderstorms are expected this afternoon from the Ozarks southward into the Ouachita Mountains and ArkLaTex. A couple of tornadoes and isolated damaging winds gusts are possible. Trends will be monitored for the potential issuance of a targeted Tornado Watch for a portion of the discussion area.
-
-LAT...LON   34079493 34539504 35509509 36969505 38169492 38699461 38929419 39099349 39109303 39049266 38539167 38269138 37879129 36859151 35599200 35119227 34499264 34019328 33869383 33869438 33909470 34079493`);
-                  }}
-                  className="px-3 py-1.5 bg-slate-100 dark:bg-slate-950 text-slate-500 hover:text-slate-800 rounded-xl text-[9px] font-bold uppercase transition-colors shrink-0"
-                >
-                  Load Mock Template
-                </button>
                 <button
                   onClick={() => {
                     handleAddCustomMD(newMDText);

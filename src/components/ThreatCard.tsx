@@ -1,4 +1,5 @@
 import { AlertTriangle, ShieldCheck, Compass, MapPin, Zap, RefreshCw, Eye } from 'lucide-react';
+import { motion } from 'motion/react';
 import { NWSAlert } from '../types';
 
 interface ThreatCardProps {
@@ -6,9 +7,10 @@ interface ThreatCardProps {
   alert: NWSAlert;
   hasAssets: boolean;
   onViewTrajectory?: (alert: NWSAlert) => void;
+  onResolve?: (alert: NWSAlert) => void;
 }
 
-export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: ThreatCardProps) {
+export default function ThreatCard({ alert, hasAssets, onViewTrajectory, onResolve }: ThreatCardProps) {
   const { event, areaDesc, expires, minDist, isDirectHit, headedTowards, etaMinutes, snippet, keywords, justUpdated } = alert;
   const isEmergency = keywords.emergency || event.includes('EMERGENCY');
   const isTornado = event.includes('TORNADO') || keywords.rotation || keywords.observed || keywords.funnel;
@@ -113,7 +115,13 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
   }
 
   return (
-    <div className={`flex flex-col rounded-2xl overflow-hidden transition-all duration-300 ${cardClass}`} id={`alert-card-${alert.id}`}>
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+      className={`flex flex-col rounded-2xl overflow-hidden transition-all duration-300 ${cardClass}`}
+      id={`alert-card-${alert.id}`}
+    >
       {/* Top Event Title Bar */}
       <div className={`py-3 px-4 font-black flex items-center justify-between text-xs md:text-sm ${headerClass}`}>
         <span className="truncate">{event}</span>
@@ -174,6 +182,67 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
           </div>
         )}
 
+        {/* Dynamic Diagnostic Trigger Signatures */}
+        {(() => {
+          const fullText = `${alert.event} ${alert.areaDesc} ${alert.description || ''} ${alert.instruction || ''} ${alert.snippet || ''}`.toUpperCase();
+          const triggerConfig = [
+            { word: 'TORNADO EMERGENCY', label: 'Tornado Emergency', reason: 'Immediate warning: Extreme threat to human life and property.', severity: 'extreme' },
+            { word: 'DEBRIS SIGNATURE', label: 'Tornadic Debris Signature (TDS)', reason: 'Radar confirms debris detection, verifying active tornado on the ground.', severity: 'extreme' },
+            { word: 'TORNADO DEBRIS', label: 'Tornado Debris Signature', reason: 'Drop in Correlation Coefficient verifies lofted particulate debris.', severity: 'extreme' },
+            { word: 'TORNADO ON THE GROUND', label: 'Observed Ground Tornado', reason: 'Eyewitness or emergency responder confirmation of tornado contact.', severity: 'extreme' },
+            { word: 'PARTICULARLY DANGEROUS SITUATION', label: 'PDS Severe Threat', reason: 'High-severity warning indicating historically volatile storm dynamics.', severity: 'extreme' },
+            { word: 'VELOCITY COUPLING', label: 'Velocity Coupling', reason: 'Severe localized gate-to-gate Doppler velocity shear.', severity: 'high' },
+            { word: 'MESOCYCLONE', label: 'Supercell Mesocyclone', reason: 'Strong rotating updraft capable of supporting violent tornadoes.', severity: 'high' },
+            { word: 'ROTATING WALL', label: 'Rotating Wall Cloud', reason: 'Visual precursor showing intense atmospheric vorticity.', severity: 'high' },
+            { word: 'DEVELOPING ROTATION', label: 'Developing Rotation', reason: 'Increasing rotational trends detected in the storm core.', severity: 'moderate' },
+            { word: 'ROTATION DETECTED', label: 'Radar Rotation', reason: 'Base velocity imagery indicates persistent mesocyclonic rotation.', severity: 'moderate' },
+            { word: 'FUNNEL CLOUD', label: 'Funnel Cloud', reason: 'Reported condensation funnel aloft, indicating localized shear.', severity: 'moderate' },
+            { word: 'SHELF CLOUD', label: 'Shelf Cloud Signature', reason: 'Strong cell gust front exhibiting potentially severe downburst wind potential.', severity: 'moderate' },
+            { word: 'WALL CLOUD', label: 'Wall Cloud Signature', reason: 'Localized lowering of updraft indicating supercellular organization.', severity: 'moderate' },
+            { word: 'DESTRUCTIVE', label: 'Destructive Parameters', reason: 'Storm attributes exceed normal warn thresholds for wind or hail.', severity: 'high' },
+            { word: '100 MPH', label: '100+ MPH Hurricane Winds', reason: 'Exceptional, destructive straight-line convective winds.', severity: 'extreme' },
+            { word: '90 MPH', label: 'Violent 90 MPH Winds', reason: 'Downburst potential capable of structural damage and utility failures.', severity: 'high' },
+            { word: '80 MPH', label: 'Severe 80 MPH Winds', reason: 'Severe straight-line winds capable of significant damage.', severity: 'high' },
+            { word: 'TORNADO...POSSIBLE', label: 'Tornado Possible', reason: 'Atmospheric profile supports rapid low-level tornadogenesis.', severity: 'moderate' }
+          ];
+
+          const matched = triggerConfig.filter(t => fullText.includes(t.word));
+
+          if (matched.length === 0) return null;
+
+          return (
+            <div className="mt-4 p-3.5 bg-slate-50 dark:bg-slate-950/60 border border-slate-200/60 dark:border-slate-800/80 rounded-xl transition-colors">
+              <span className="text-[10px] font-black uppercase text-cyan-600 dark:text-neon-aqua tracking-wider flex items-center mb-2.5">
+                <Zap className="w-3.5 h-3.5 mr-1.5 text-cyan-500 dark:text-neon-aqua" />
+                Diagnostic Trigger Signatures
+              </span>
+              <div className="flex flex-col gap-2.5">
+                {matched.map((trig, idx) => (
+                  <div key={idx} className="flex flex-col border-l-2 pl-2.5 py-0.5 transition-all border-slate-350 dark:border-slate-800 hover:border-cyan-500 dark:hover:border-neon-aqua">
+                    <div className="flex items-center gap-1.5 justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                        {trig.label}
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest leading-none ${
+                        trig.severity === 'extreme'
+                          ? 'bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400'
+                          : trig.severity === 'high'
+                          ? 'bg-orange-500/10 border border-orange-500/20 text-orange-600 dark:text-orange-400'
+                          : 'bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400'
+                      }`}>
+                        {trig.severity}
+                      </span>
+                    </div>
+                    <p className="text-[9px] font-medium text-slate-500 dark:text-slate-400 leading-snug mt-1">
+                      {trig.reason}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Extracted badges tags */}
         <div className="mt-4 flex flex-wrap gap-1.5 justify-center">
           {headedTowards && (
@@ -232,12 +301,21 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
             <Eye className="w-3.5 h-3.5" /> Analyze Storm Trajectory
           </button>
         )}
+
+        {onResolve && (
+          <button
+            onClick={() => onResolve(alert)}
+            className="mt-2 w-full bg-emerald-500/15 dark:bg-emerald-500/20 hover:bg-emerald-500 dark:hover:bg-emerald-500 hover:text-slate-950 dark:hover:text-slate-950 text-emerald-600 dark:text-emerald-400 font-extrabold py-2 rounded-xl text-xs uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 border border-emerald-500/30 dark:border-emerald-500/50 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4" /> Resolve & Archive Threat
+          </button>
+        )}
       </div>
 
       {/* Expiration Bar */}
       <div className="bg-slate-50 dark:bg-slate-955 p-2.5 text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest border-t border-slate-200 dark:border-slate-800 font-mono transition-colors">
         EXPIRES: {formatTime(expires)}
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -22,6 +22,7 @@ export interface NWSAlert {
   description: string;
   instruction: string;
   expires: string;
+  sent?: string;
   geometry?: {
     type: string;
     coordinates: any;
@@ -53,6 +54,7 @@ export interface SystemSettings {
   audio: boolean;
   vibrate: boolean;
   flash: boolean;
+  monitorRadius: number;
 }
 
 export interface MesoscaleDiscussion {
@@ -68,5 +70,18 @@ export interface MesoscaleDiscussion {
   coordinates: { lat: number; lon: number }[];
   isIntersecting: boolean;
   minDist: number;
+}
+
+export interface RotationPin {
+  id: string;
+  lat: number;
+  lon: number;
+  alertId: string;
+  eventName: string;
+  areaDesc: string;
+  detectedAt: string;
+  pinType?: 'vortex' | 'radar_indicated' | 'mesocyclone';
+  threatLevel?: 'Normal' | 'Severe' | 'Extreme';
+  isObserved?: boolean;
 }
 
