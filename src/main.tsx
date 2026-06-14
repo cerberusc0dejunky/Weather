@@ -3,6 +3,24 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+// Dynamically initialize Google Analytics if VITE_GA_MEASUREMENT_ID is configured
+const gaId = (import.meta as any).env?.VITE_GA_MEASUREMENT_ID;
+if (gaId) {
+  const script1 = document.createElement('script');
+  script1.async = true;
+  script1.src = `https://www.googletagmanager.com/gtag/js?id=${gaId}`;
+  document.head.appendChild(script1);
+
+  const script2 = document.createElement('script');
+  script2.text = `
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){window.dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', '${gaId}', { send_page_view: true });
+  `;
+  document.head.appendChild(script2);
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

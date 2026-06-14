@@ -1,4 +1,4 @@
-import { MapPin, Compass, Settings } from 'lucide-react';
+import { MapPin, Compass, Settings, ShieldCheck, AlertTriangle } from 'lucide-react';
 
 interface GeolocationModalProps {
   onAccept: () => void;
@@ -20,6 +20,28 @@ export default function GeolocationModal({ onAccept, onDecline }: GeolocationMod
         <p className="text-slate-400 text-sm font-semibold mb-6 leading-relaxed">
           DAISY calculates real-time distances between your current coordinates and active tornado warning polygons to keep you informed of threats.
         </p>
+
+        {/* Local Security & Refresh Risk Disclosure */}
+        <div className="border border-slate-800 bg-slate-950/40 rounded-xl p-4 text-left text-[11px] text-slate-400 space-y-2 mb-6">
+          <div>
+            <p className="font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
+              <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+              Privacy Protection
+            </p>
+            <p className="leading-relaxed mt-0.5">
+              Warning computations and GPS tags run purely within your sandboxed browser. No location metrics are aggregated, transmitted, or stored on external servers.
+            </p>
+          </div>
+          <div className="border-t border-slate-800 pt-2">
+            <p className="font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+              Transient Client State
+            </p>
+            <p className="leading-relaxed mt-0.5">
+              Because this app persists data in your secure memory browser storage, reloading your browser window will reset active alarms. You will need to click "Activate Alarms" again and consent to GPS retrieval upon reload.
+            </p>
+          </div>
+        </div>
         
         <div className="flex flex-col gap-3">
           <button

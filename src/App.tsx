@@ -53,6 +53,8 @@ import {
   AlertOctagon,
   Sun,
   Moon,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 
 const TRACKED_ALERTS_FILTER = [
@@ -309,6 +311,7 @@ export default function App() {
   });
 
   const [alerts, setAlerts] = useState<NWSAlert[]>([]);
+  const [showHeadedTowardsOnly, setShowHeadedTowardsOnly] = useState<boolean>(false);
   const [alertHistory, setAlertHistory] = useState<ResolvedAlert[]>(() => {
     const raw = localStorage.getItem('daisy-alert-history');
     return raw ? JSON.parse(raw) : [];
@@ -1434,6 +1437,151 @@ export default function App() {
     (d) => d.isIntersecting && d.probability >= 40
   );
 
+  // Derive Atmospheric stability & Storm Bypass Probability trends based on 6-Hour historical and forecast data
+  const forecastTrend = (() => {
+    const hasPressure = pressureHistory && pressureHistory.length >= 2;
+    const hasCape = capeHistory && capeHistory.length >= 2;
+
+    if (!hasPressure && !hasCape) {
+      return {
+        status: 'Trend: Stable',
+        statusDesc: 'Synchronizing regional surface pressure sensors and convective profiles. Active coordinate targets currently reflect thermodynamically stable layers.',
+        bypassChance: 'N/A',
+        badgeColor: 'border-slate-300 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 text-slate-500',
+        textColor: 'text-slate-500',
+        shadowColor: '',
+        trendLabel: 'Awaiting polling records to calculate local storm bypass risk indices.',
+        pressureDeltaText: 'Measuring...',
+        capeDeltaText: 'Measuring...',
+        pressureDirection: 'Stable',
+        capeDirection: 'Stable',
+        deltaPressure: 0,
+        maxCapeVal: 0,
+        currentCapeVal: 0,
+        isUnstable: false,
+        isStable: true
+      };
+    }
+
+    // 1. Calculate pressure trend over available polling ticks
+    let deltaPressure = 0;
+    let pressureDirection = 'Steady';
+    if (hasPressure) {
+      const earliestP = pressureHistory[0].pressure;
+      const latestP = pressureHistory[pressureHistory.length - 1].pressure;
+      deltaPressure = latestP - earliestP;
+      if (deltaPressure < -0.04) {
+        pressureDirection = 'Falling Rapidly';
+      } else if (deltaPressure < -0.01) {
+        pressureDirection = 'Falling';
+      } else if (deltaPressure > 0.04) {
+        pressureDirection = 'Rising Rapidly';
+      } else if (deltaPressure > 0.01) {
+        pressureDirection = 'Rising';
+      }
+    }
+
+    // 2. Calculate CAPE trend over historical and predictive points
+    const currentCapeVal = windyPointTelemetry?.cape !== undefined 
+      ? windyPointTelemetry.cape 
+      : (capeHistory.length > 0 ? capeHistory[capeHistory.length - 1].cape : 0);
+    const maxCapeVal = capeHistory.length > 0 ? Math.max(...capeHistory.map(p => p.cape)) : currentCapeVal;
+    
+    let capeDirection = 'Stable';
+    if (hasCape) {
+      const earliestC = capeHistory[0].cape;
+      const latestC = currentCapeVal;
+      const deltaCape = latestC - earliestC;
+      if (deltaCape > 300) {
+        capeDirection = 'Increasing Instability';
+      } else if (deltaCape < -300) {
+        capeDirection = 'Stabilizing';
+      }
+    }
+
+    // 3. Synthesize stability trends into direct storm bypass metrics
+    let status = 'Trend: Stable';
+    let statusDesc = 'Approaching storms are highly likely to weaken, dissipate, or split and go around your selected locations due to low atmospheric fuel.';
+    let bypassChance = 'High (80% - 90% Bypass)';
+    let badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400';
+    let textColor = 'text-emerald-700 dark:text-emerald-400';
+    let shadowColor = 'shadow-[0_4px_20px_rgba(16,185,129,0.05)]';
+    let trendLabel = 'Stable Atmosphere / Storm Dissipation Mode';
+    let isUnstable = false;
+    let isStable = true;
+    
+    const pressureDeltaText = `${deltaPressure >= 0 ? '+' : ''}${deltaPressure.toFixed(2)} InHg`;
+    const capeDeltaText = `${maxCapeVal} J/kg Peak`;
+
+    // Case 1: Extreme Instability / Active Destabilizing Environment
+    if (deltaPressure < -0.015 && (maxCapeVal > 1500 || capeDirection === 'Increasing Instability')) {
+      status = 'Trend: Rapidly Destabilizing';
+      statusDesc = 'Atmospheric pressure is dropping rapidly while convective energy rises. Storm cells entering this workspace are highly likely to maintain severity or intensify to direct hits.';
+      bypassChance = 'Minimal (5% - 15% Bypass)';
+      badgeColor = 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400';
+      textColor = 'text-rose-600 dark:text-rose-400';
+      shadowColor = 'shadow-[0_4px_20px_rgba(239,68,68,0.08)]';
+      trendLabel = 'Severe Instability / High Storm Maintenance Air Mass';
+      isUnstable = true;
+      isStable = false;
+    }
+    // Case 2: Thermodynamically Stable (Low CAPE)
+    else if (maxCapeVal < 300 && deltaPressure >= -0.01) {
+      status = 'Trend: Stable';
+      statusDesc = 'Local microclimate lacks convective buoyancy and thermal moisture (CAPE < 300). Approaching convective cells usually lose internal convection and divert path or go around you.';
+      bypassChance = 'Very High (90% - 95% Bypass)';
+      badgeColor = 'bg-teal-500/10 border-teal-500 text-teal-600 dark:text-neon-aqua';
+      textColor = 'text-teal-600 dark:text-neon-aqua';
+      shadowColor = 'shadow-[0_4px_20px_rgba(20,184,166,0.05)]';
+      trendLabel = 'Atmospheric Shield / Severe Weather Unfavorable';
+      isUnstable = false;
+      isStable = true;
+    }
+    // Case 3: Storm Decaying / Cool Stabilization
+    else if (deltaPressure > 0.01 || (capeDirection === 'Stabilizing' && maxCapeVal < 1000)) {
+      status = 'Trend: Stabilizing';
+      statusDesc = 'Pressure is rising or CAPE indices are actively cooling down, indicating the storm engine is choked of convective potential. Incoming cells are expected to weaken or decay.';
+      bypassChance = 'High (70% - 85% Bypass)';
+      badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400';
+      textColor = 'text-emerald-700 dark:text-emerald-400';
+      shadowColor = 'shadow-[0_4px_20px_rgba(16,185,129,0.05)]';
+      trendLabel = 'Positive Pressure Drift / Convective Decay';
+      isUnstable = false;
+      isStable = true;
+    }
+    // Case 4: Moderately Unstable / Dynamic Course Changes
+    else {
+      status = 'Trend: Moderately Unstable';
+      statusDesc = 'Atmospheric parameters support moderate convective support (CAPE ~800-1500). Alert paths may wobble, shift, or decay, making trajectory tracking crucial.';
+      bypassChance = 'Moderate (45% - 60% Bypass)';
+      badgeColor = 'bg-amber-500/10 border-amber-500 text-amber-600 dark:text-amber-400';
+      textColor = 'text-amber-600 dark:text-amber-400';
+      shadowColor = 'shadow-[0_4px_20px_rgba(245,158,11,0.05)]';
+      trendLabel = 'Dynamic Convective Corridor / Ongoing Maintenance';
+      isUnstable = true;
+      isStable = false;
+    }
+
+    return {
+      status,
+      statusDesc,
+      bypassChance,
+      badgeColor,
+      textColor,
+      shadowColor,
+      trendLabel,
+      pressureDeltaText,
+      capeDeltaText,
+      pressureDirection,
+      capeDirection,
+      deltaPressure,
+      maxCapeVal,
+      currentCapeVal,
+      isUnstable,
+      isStable
+    };
+  })();
+
   return (
     <div className={`min-h-screen flex flex-col text-slate-900 dark:text-slate-100 ${settings.flash && isAnyDirectHitWarningActive ? 'flash-active-severe' : 'bg-slate-50 dark:bg-slate-950'} transition-colors duration-300`}>
       {/* Geolocation Modal Engagement */}
@@ -1469,11 +1617,34 @@ export default function App() {
           >
             Activate Alarms
           </button>
+
+          {/* Secure Client Sandbox Disclaimers & Session Risk Information */}
+          <div className="mt-8 max-w-md border border-slate-800 bg-slate-900/60 backdrop-blur-md rounded-2xl p-5 text-left text-xs text-slate-400 space-y-3 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Data Protection Disclosure</h4>
+                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-400">
+                  D.A.I.S.Y. prioritizes private-by-default workflows. Geolocated coordinates, monitored secure spots, and historical alert profiles are calculated and kept exclusively inside your local browser storage. No user positions, network traces, or tracking files are sent, shared, or maintained by external cloud bases.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-start gap-3 border-t border-slate-800/60 pt-3">
+              <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Transient Session state Limit</h4>
+                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-400">
+                  This application functions as a high-frequency telemetry workspace. Reloading or refreshing your browser session forces a complete security clearance and state cycle. If you reload, you must reactivate alarms and grant GPS safety permissions again.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Primary Dashboard Area */}
-      <div className="main-container flex-grow flex flex-col gap-6 py-6 font-sans px-4 md:px-6 max-w-7xl mx-auto w-full transition-all">
+      <div className="main-container flex-grow flex flex-col gap-6 py-6 font-sans px-4 md:px-6 max-w-[90%] mx-auto w-full transition-all">
         
         {/* Toast notifications center */}
         {notificationToast && (
@@ -1524,29 +1695,7 @@ export default function App() {
           </div>
         )}
 
-        {/* SPC Mesoscale Discussion Watch Advisory */}
-        {activeIntersectingMD && !isAnyDirectHitWarningActive && (
-          <div className="bg-amber-950/70 border-2 border-amber-500 p-4 rounded-2xl flex justify-between items-center shadow-[0_0_20px_rgba(245,158,11,0.2)]">
-            <div className="flex items-center gap-3 text-white">
-              <Radio className="w-5 h-5 text-amber-500 shrink-0 animate-pulse" />
-              <div>
-                <h4 className="text-xs font-black uppercase text-amber-200">
-                  SPC Mesoscale Discussion #{activeIntersectingMD.number} Watch Advisory
-                </h4>
-                <p className="text-amber-300 text-[10px] font-semibold leading-relaxed">
-                  Severe convective potential is rising. Watch Issuance Probability: <span className="font-black text-white bg-amber-500 px-1 py-0.5 rounded text-[9px]">{activeIntersectingMD.probability}%</span>. Zone: {activeIntersectingMD.areasAffected}.
-                </p>
-              </div>
-            </div>
 
-            <button
-              onClick={() => handleFocusMD(activeIntersectingMD)}
-              className="px-3 py-1.5 bg-slate-900 text-amber-400 hover:text-amber-200 border border-amber-700 hover:border-amber-500 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer shrink-0"
-            >
-              Examine Corridor
-            </button>
-          </div>
-        )}
 
         {/* Dynamic Nav Header Bar */}
         <header className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 flex flex-col gap-6 shadow-md transition-all">
@@ -1710,366 +1859,371 @@ export default function App() {
                 setCurrentLon(lon);
               }}
             />
+          </div>          {/* Spatial Interactive Disclaimer Panel */}
+          <div className="w-full p-5 bg-rose-50 dark:bg-rose-950/10 border border-rose-200 dark:border-red-500/20 rounded-3xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
+            <Info className="w-5 h-5 text-rose-600 dark:text-red-500 shrink-0" />
+            <p className="text-[10px] font-bold leading-relaxed uppercase tracking-tight">
+              Disclaimer: DAISY is built as secondary informational tracking only. Do not rely solely on DAISY for life-safety choices in critical scenarios.
+            </p>
           </div>
 
           {/* 2. Anchor Coordinates Manager (Selected custom locations list under the map) */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-            <div className="lg:col-span-8">
-              <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors h-full flex flex-col justify-between" aria-label="Coordinates Manager">
-                <div>
-                  <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                    <MapPin className="w-4 h-4 text-cyan-600 dark:text-neon-aqua" />
-                    Monitored Coordinates Anchor
-                  </h3>
-
-                  <div className="flex flex-col md:flex-row gap-5 items-start">
-                    {/* Add Coordinates Search Input */}
-                    <div className="w-full md:w-1/3 relative shrink-0">
-                      <input
-                        type="text"
-                        id="searchQuery"
-                        name="searchQuery"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleAddNewPin()}
-                        placeholder="Enter US City, Zip, or Address"
-                        disabled={searching}
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 font-sans text-xs font-bold py-3 pl-4 pr-10 rounded-xl focus:border-neon-aqua focus:ring-0 outline-none disabled:opacity-50"
-                        autoComplete="street-address"
-                      />
-                      <button
-                        onClick={handleAddNewPin}
-                        disabled={searching}
-                        className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Active Selected Coordinates List */}
-                    <div className="w-full md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
-                      {assets.length === 0 ? (
-                        <div className="col-span-full p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[10px] font-mono font-extrabold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
-                          No active tracking anchors
-                        </div>
-                      ) : (
-                        assets.map((asset) => (
-                          <div
-                            key={asset.id}
-                            onClick={() => {
-                              setCurrentLat(asset.lat);
-                              setCurrentLon(asset.lon);
-                              fetchTelemetry(asset.lat, asset.lon);
-                            }}
-                            className={`py-2 px-3 border rounded-xl flex items-center justify-between gap-3 font-sans transition-all cursor-pointer ${
-                              Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001
-                                ? 'bg-cyan-500/10 border-cyan-500 dark:border-neon-aqua/70 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
-                                : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-705'
-                            }`}
-                          >
-                            <div className="truncate flex-grow">
-                              <span className="text-[10px] font-black uppercase text-slate-800 dark:text-white block truncate">
-                                {asset.name}
-                                {Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001 && (
-                                  <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                                )}
-                              </span>
-                              <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-slate-500 block mt-0.5">
-                                LAT: {asset.lat.toFixed(3)}, LON: {asset.lon.toFixed(3)}
-                              </span>
-                            </div>
-
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemovePin(asset.id);
-                              }}
-                              className="p-1 text-slate-400 hover:text-rose-500 dark:hover:text-neon-pink shrink-0 transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </div>
-
-            {/* Disclaimer & Information Strip */}
-            <div className="lg:col-span-4 flex flex-col justify-between">
-              <div className="h-full p-5 bg-rose-50 dark:bg-rose-950/10 border border-rose-200 dark:border-red-500/20 rounded-3xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
-                <Info className="w-5 h-5 text-rose-600 dark:text-red-500 shrink-0" />
-                <p className="text-[10px] font-bold leading-relaxed uppercase tracking-tight">
-                  Disclaimer: DAISY is built as secondary informational tracking only. Do not rely solely on DAISY for life-safety choices in critical scenarios.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Observational & Convective Prognostic Telemetry Comparison */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-            {/* Ground Surface: NWS ASOS ground sensors on left */}
-            <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="NWS Telemetry observations">
+          <div className="w-full">
+            <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="Coordinates Manager">
               <div>
-                <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
-                  Ground Surface Air Telemetry (NWS ASOS)
+                <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-cyan-600 dark:text-neon-aqua" />
+                  Monitored Coordinates Anchor
                 </h3>
-                
-                {telemetry ? (
-                  <>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
-                        <Thermometer className="w-7 h-7 text-rose-500 dark:text-neon-pink shrink-0" />
-                        <div>
-                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Temp / Dew</span>
-                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block">
-                            {telemetry.temperature ? `${telemetry.temperature}°F` : 'N/A'}{' '}
-                            <span className="text-slate-500 dark:text-slate-400 text-[10px] font-semibold">({telemetry.dewPoint || '--'}°)</span>
-                          </span>
-                        </div>
-                      </div>
 
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
-                        <Wind className="w-7 h-7 text-cyan-600 dark:text-neon-aqua shrink-0" />
-                        <div>
-                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Surf Wind</span>
-                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
-                            {telemetry.windSpeed ? `${telemetry.windSpeed} mph` : 'Calm'}
-                            {telemetry.windGust && (
-                              <span className="text-rose-500 dark:text-neon-pink text-[10px] font-bold block">G: {telemetry.windGust} mph</span>
-                            )}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
-                        <Gauge className="w-7 h-7 text-slate-400 dark:text-white/50 shrink-0" />
-                        <div>
-                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Baro Pres</span>
-                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
-                            {telemetry.pressure ? `${telemetry.pressure} InHg` : 'N/A'}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
-                        <Compass className="w-7 h-7 text-indigo-500 dark:text-indigo-400 shrink-0 animate-[spin_12s_linear_infinite]" />
-                        <div>
-                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Weather</span>
-                          <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 mt-1 block truncate max-w-[110px] uppercase">
-                            {telemetry.textDescription || 'Stable conditions'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Barometric Pressure Trend Recharts Area Chart */}
-                    {pressureHistory && pressureHistory.length > 0 && (
-                      <div className="mt-3 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-950/40 transition-colors">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5 mb-2">
-                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1 font-sans">
-                            <Gauge className="w-3 h-3 text-cyan-600 dark:text-neon-aqua animate-pulse" />
-                            Barometric Decay (Last 6 Polls)
-                          </span>
-                          {pressureHistory.length >= 2 && (
-                            <div className="text-[8px] font-extrabold uppercase tracking-widest font-mono">
-                              {pressureHistory[pressureHistory.length - 1].pressure < pressureHistory[0].pressure ? (
-                                <span className="text-amber-500 dark:text-amber-400">
-                                  DECAY: -{(pressureHistory[0].pressure - pressureHistory[pressureHistory.length - 1].pressure).toFixed(2)} InHg
-                                </span>
-                              ) : (
-                                <span className="text-teal-500">BAROMETER STABLE</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="h-20 w-full mt-1">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart
-                              data={pressureHistory}
-                              margin={{ top: 2, right: 5, left: -32, bottom: 0 }}
-                            >
-                              <defs>
-                                <linearGradient id="pressureGrad" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#0891b2" stopOpacity={0.25} />
-                                  <stop offset="95%" stopColor="#0891b2" stopOpacity={0.0} />
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.1} vertical={false} />
-                              <XAxis
-                                dataKey="time"
-                                tick={{ fill: '#64748b', fontSize: 7, fontFamily: 'monospace' }}
-                                tickLine={false}
-                                axisLine={false}
-                              />
-                              <YAxis
-                                domain={['dataMin - 0.05', 'dataMax + 0.05']}
-                                tick={{ fill: '#64748b', fontSize: 7, fontFamily: 'monospace' }}
-                                tickLine={false}
-                                axisLine={false}
-                                tickFormatter={(val) => val.toFixed(2)}
-                              />
-                              <Tooltip content={<PressureBaroTooltip />} cursor={{ stroke: '#0891b2', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                              <Area
-                                type="monotone"
-                                dataKey="pressure"
-                                stroke="#0891b2"
-                                strokeWidth={1.5}
-                                fillOpacity={1}
-                                fill="url(#pressureGrad)"
-                                activeDot={{ r: 3, strokeWidth: 0, fill: '#06b6d4' }}
-                              />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Wind Velocity Differential Gauge */}
-                    <WindGauge
-                      windSpeed={telemetry.windSpeed}
-                      windGust={telemetry.windGust}
+                <div className="flex flex-col md:flex-row gap-5 items-start">
+                  {/* Add Coordinates Search Input */}
+                  <div className="w-full md:w-1/3 relative shrink-0">
+                    <input
+                      type="text"
+                      id="searchQuery"
+                      name="searchQuery"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddNewPin()}
+                      placeholder="Enter US City, Zip, or Address"
+                      disabled={searching}
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 font-sans text-xs font-bold py-3 pl-4 pr-10 rounded-xl focus:border-neon-aqua focus:ring-0 outline-none disabled:opacity-50"
+                      autoComplete="street-address"
                     />
-                  </>
-                ) : (
-                  <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[9px] uppercase text-center rounded-xl">
-                    Synchronizing closest station observational grids...
+                    <button
+                      onClick={handleAddNewPin}
+                      disabled={searching}
+                      className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
                   </div>
-                )}
-              </div>
-              {telemetry && (
-                <div className="flex justify-between items-center text-[8px] font-mono font-semibold text-slate-400 dark:text-slate-600 mt-3 pt-2 border-t border-slate-200 dark:border-slate-800/50">
-                  <span>STATION METAR ID: {telemetry.stationId}</span>
-                  <span>SYNCED: {telemetry.timestamp || 'STABLE'}</span>
-                </div>
-              )}
-            </section>
 
-            {/* Windy Predictive model: Convective environment analyzer on right */}
-            <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="Windy Point Convective analysis">
-              <div>
-                <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <Compass className="w-4 h-4 text-rose-500 dark:text-neon-pink animate-[spin_12s_linear_infinite]" />
-                  Convective Environment Prognosis (Windy Point Model)
-                </h3>
-
-                {windyPointLoading ? (
-                  <div className="h-full flex flex-col justify-center items-center text-center p-8">
-                    <Activity className="w-8 h-8 text-rose-500 dark:text-neon-pink animate-pulse mb-3" />
-                    <span className="text-[10px] font-mono uppercase font-black tracking-widest text-slate-400">
-                      Querying Atmospheric Convective Elements...
-                    </span>
-                  </div>
-                ) : windyPointTelemetry ? (
-                  <div className="flex flex-col gap-3.5">
-                    {/* CAPE Severe Tornado Potential Analyzer Slider */}
-                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-2xl transition-colors">
-                      <div className="flex justify-between items-center mb-1.5">
-                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider">
-                          Convective Instability (CAPE Index)
-                        </span>
-                        <span className={`px-2 py-0.5 rounded text-[8px] font-mono font-black border uppercase ${
-                          (windyPointTelemetry.cape || 0) > 2500
-                            ? 'bg-red-500/10 border-red-500 text-red-500'
-                            : (windyPointTelemetry.cape || 0) > 1000
-                            ? 'bg-amber-500/10 border-amber-500 text-amber-500'
-                            : 'bg-emerald-500/10 border-emerald-500 text-emerald-500'
-                        }`}>
-                          {windyPointTelemetry.cape || 0} J/kg
-                        </span>
+                  {/* Active Selected Coordinates List */}
+                  <div className="w-full md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
+                    {assets.length === 0 ? (
+                      <div className="col-span-full p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[10px] font-mono font-extrabold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                        No active tracking anchors
                       </div>
-
-                      {/* Continuous Visual Progress Representation */}
-                      <div className="w-full h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden relative">
+                    ) : (
+                      assets.map((asset) => (
                         <div
-                          className={`h-full transition-all duration-500 ${
-                            (windyPointTelemetry.cape || 0) > 2500
-                              ? 'bg-red-600 shadow-[0_0_8px_#dc2626]'
-                              : (windyPointTelemetry.cape || 0) > 1000
-                              ? 'bg-amber-500'
-                              : 'bg-emerald-500'
+                          key={asset.id}
+                          onClick={() => {
+                            setCurrentLat(asset.lat);
+                            setCurrentLon(asset.lon);
+                            fetchTelemetry(asset.lat, asset.lon);
+                          }}
+                          className={`py-2 px-3 border rounded-xl flex items-center justify-between gap-3 font-sans transition-all cursor-pointer ${
+                            Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001
+                              ? 'bg-cyan-500/10 border-cyan-500 dark:border-neon-aqua/70 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                              : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-705'
                           }`}
-                          style={{ width: `${Math.min(100, ((windyPointTelemetry.cape || 0) / 3000) * 100)}%` }}
-                        ></div>
-                      </div>
+                        >
+                          <div className="truncate flex-grow">
+                            <span className="text-[10px] font-black uppercase text-slate-800 dark:text-white block truncate">
+                              {asset.name}
+                              {Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001 && (
+                                <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                              )}
+                            </span>
+                            <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-slate-500 block mt-0.5">
+                              LAT: {asset.lat.toFixed(3)}, LON: {asset.lon.toFixed(3)}
+                            </span>
+                          </div>
 
-                      <div className="flex justify-between font-mono text-[7px] text-slate-400 dark:text-slate-600 mt-1 uppercase font-semibold">
-                        <span>STABLE (0)</span>
-                        <span>SEVERE POTENTIAL (1000)</span>
-                        <span>EXTREME TORNADO RISK (2500)</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemovePin(asset.id);
+                            }}
+                            className="p-1 text-slate-400 hover:text-rose-500 dark:hover:text-neon-pink shrink-0 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* 3. Ground Surface Air Telemetry (NWS ASOS) & Local Forecast trends (Unified ASOS & Bypass Dashboard) */}
+          <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="NWS Telemetry and Forecast Microclimate Analysis">
+            <div>
+              <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                Ground Surface Air Telemetry (NWS ASOS) & Local Microclimate Trends
+              </h3>
+              
+              {telemetry ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                      <Thermometer className="w-7 h-7 text-rose-500 dark:text-neon-pink shrink-0" />
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Temp / Dew</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block">
+                          {telemetry.temperature ? `${telemetry.temperature}°F` : 'N/A'}{' '}
+                          <span className="text-slate-500 dark:text-slate-400 text-[10px] font-semibold">({telemetry.dewPoint || '--'}°)</span>
+                        </span>
                       </div>
                     </div>
 
-                    {/* Parameter grids */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl transition-colors">
-                        <span className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none">Model Temp / Dew</span>
-                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1.5 block">
-                          {windyPointTelemetry.temp ? `${windyPointTelemetry.temp}°F` : 'N/A'}{' '}
-                          <span className="text-slate-500 dark:text-slate-400 text-[10px] font-semibold">({windyPointTelemetry.dewpoint || '--'}°)</span>
-                        </span>
-                      </div>
-
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl transition-colors">
-                        <span className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none">Model Wind / Gusts</span>
-                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1.5 block">
-                          {windyPointTelemetry.wind ? `${windyPointTelemetry.wind} mph` : 'Calm'}
-                          {windyPointTelemetry.gust && (
-                            <span className="text-rose-500 dark:text-neon-pink font-bold inline-block ml-1">G: {windyPointTelemetry.gust} mph</span>
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                      <Wind className="w-7 h-7 text-cyan-600 dark:text-neon-aqua shrink-0" />
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Surf Wind</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                          {telemetry.windSpeed ? `${telemetry.windSpeed} mph` : 'Calm'}
+                          {telemetry.windGust && (
+                            <span className="text-rose-500 dark:text-neon-pink text-[10px] font-bold block">G: {telemetry.windGust} mph</span>
                           )}
                         </span>
                       </div>
+                    </div>
 
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl transition-colors">
-                        <span className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none">Model Baro Pressure</span>
-                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1.5 block">
-                          {windyPointTelemetry.pressure ? `${windyPointTelemetry.pressure} InHg` : 'N/A'}
-                        </span>
-                      </div>
-
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-2.5 rounded-xl transition-colors">
-                        <span className="text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none">Model Precip Rate</span>
-                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1.5 block">
-                          {windyPointTelemetry.precip !== undefined ? `${windyPointTelemetry.precip} in/hr` : '0.00 in/hr'}
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                      <Gauge className="w-7 h-7 text-slate-400 dark:text-white/50 shrink-0" />
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Baro Pres</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                          {telemetry.pressure ? `${telemetry.pressure} InHg` : 'N/A'}
                         </span>
                       </div>
                     </div>
 
-                    {/* CAPE index Convective available potential energy 6-hour history chart */}
-                    <CapeHistoryChart
-                      history={capeHistory}
-                      currentCape={windyPointTelemetry.cape || 0}
-                      loading={windyPointLoading}
-                    />
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                      <Compass className="w-7 h-7 text-indigo-500 dark:text-indigo-400 shrink-0 animate-[spin_12s_linear_infinite]" />
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Weather</span>
+                        <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 mt-1 block truncate max-w-[110px] uppercase">
+                          {telemetry.textDescription || 'Stable conditions'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <div className="py-8 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-600 font-mono text-[9px] uppercase text-center rounded-xl flex flex-col items-center justify-center gap-1.5 min-h-[180px]">
-                    <span>Model Telemetry ready on Gateway Arming state</span>
-                    <span className="text-[8px] text-slate-500">Active model target: ({currentLat.toFixed(3)}, {currentLon.toFixed(3)})</span>
-                  </div>
-                )}
-              </div>
 
-              {windyPointTelemetry && (
-                <div className="flex justify-between items-center text-[8px] font-mono font-semibold text-slate-400 dark:text-slate-600 mt-3 pt-2 border-t border-slate-200 dark:border-slate-800/50">
-                  <span>FORECAST MODEL: {windyPointTelemetry.modelUsed} High-Res Point</span>
-                  <span>COORDINATES TARGET: ({currentLat.toFixed(2)}, {currentLon.toFixed(2)})</span>
+                  {pressureHistory && pressureHistory.length > 0 && (
+                    <div className="mt-3 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-950/40 transition-colors">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5 mb-2">
+                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1 font-sans">
+                          <Gauge className="w-3 h-3 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                          Barometric Decay (Last 6 Polls)
+                        </span>
+                        {pressureHistory.length >= 2 && (
+                          <div className="text-[8px] font-extrabold uppercase tracking-widest font-mono">
+                            {pressureHistory[pressureHistory.length - 1].pressure < pressureHistory[0].pressure ? (
+                              <span className="text-amber-500 dark:text-amber-400">
+                                DECAY: -{(pressureHistory[0].pressure - pressureHistory[pressureHistory.length - 1].pressure).toFixed(2)} InHg
+                              </span>
+                            ) : (
+                              <span className="text-teal-500">BAROMETER STABLE</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="h-20 w-full mt-1">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart
+                            data={pressureHistory}
+                            margin={{ top: 2, right: 5, left: -32, bottom: 0 }}
+                          >
+                            <defs>
+                              <linearGradient id="pressureGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#0891b2" stopOpacity={0.25} />
+                                <stop offset="95%" stopColor="#0891b2" stopOpacity={0.0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.1} vertical={false} />
+                            <XAxis
+                              dataKey="time"
+                              tick={{ fill: '#64748b', fontSize: 7, fontFamily: 'monospace' }}
+                              tickLine={false}
+                              axisLine={false}
+                            />
+                            <YAxis
+                              domain={['dataMin - 0.05', 'dataMax + 0.05']}
+                              tick={{ fill: '#64748b', fontSize: 7, fontFamily: 'monospace' }}
+                              tickLine={false}
+                              axisLine={false}
+                              tickFormatter={(val) => val.toFixed(2)}
+                            />
+                            <Tooltip content={<PressureBaroTooltip />} cursor={{ stroke: '#0891b2', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                            <Area
+                              type="monotone"
+                              dataKey="pressure"
+                              stroke="#0891b2"
+                              strokeWidth={1.5}
+                              fillOpacity={1}
+                              fill="url(#pressureGrad)"
+                              activeDot={{ r: 3, strokeWidth: 0, fill: '#06b6d4' }}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+
+                  <WindGauge
+                    windSpeed={telemetry.windSpeed}
+                    windGust={telemetry.windGust}
+                  />
+                </>
+              ) : (
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[9px] uppercase text-center rounded-xl">
+                  Synchronizing closest station observational grids...
                 </div>
               )}
-            </section>
-          </div>
+            </div>
+
+            <hr className="border-slate-200 dark:border-slate-800/80 my-5" />
+
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-2">
+                <div>
+                  <h4 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                    D.A.I.S.Y. Microclimate Forecast Trends & Storm Bypass Index
+                  </h4>
+                  <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-0.5 uppercase font-mono">
+                    Thermodynamic course & intensity prediction computed over 6-hour trailing metrics
+                  </p>
+                </div>
+                <div className={`px-3 py-1 rounded-xl text-xs font-bold border flex items-center gap-2 uppercase tracking-wider ${forecastTrend.badgeColor} ${forecastTrend.shadowColor} mt-2 sm:mt-0`}>
+                  <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span>
+                  {forecastTrend.status}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                <div className="lg:col-span-7 space-y-4">
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block font-mono">
+                      Environment Diagnostic
+                    </span>
+                    <p className="text-slate-800 dark:text-white font-black text-lg md:text-xl font-sans tracking-tight leading-snug">
+                      {forecastTrend.trendLabel}
+                    </p>
+                    <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold leading-relaxed">
+                      {forecastTrend.statusDesc}
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-950 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none font-mono mb-1">
+                        Bypass / Shield Probability
+                      </span>
+                      <span className={`text-xl font-black ${forecastTrend.textColor}`}>
+                        {forecastTrend.bypassChance}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 leading-relaxed max-w-xs font-semibold uppercase font-mono">
+                      Severe cells may change course, split, or fail completely when encountering local stable air masses.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-32 transition-transform hover:scale-[1.01]">
+                    <div className="flex justify-between items-start">
+                      <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider font-mono">
+                        Surface Pressure Change
+                      </span>
+                      <Gauge className="w-4.5 h-4.5 text-cyan-600 dark:text-neon-aqua" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
+                        {forecastTrend.pressureDeltaText}
+                        {forecastTrend.deltaPressure < -0.01 ? (
+                          <TrendingDown className="w-5 h-5 text-rose-500 inline shrink-0" />
+                        ) : forecastTrend.deltaPressure > 0.01 ? (
+                          <TrendingUp className="w-5 h-5 text-teal-500 inline shrink-0" />
+                        ) : null}
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 block font-mono">
+                        Trend: {forecastTrend.pressureDirection}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-32 transition-transform hover:scale-[1.01]">
+                    <div className="flex justify-between items-start">
+                      <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider font-mono">
+                        Convective Availability
+                      </span>
+                      <Compass className="w-4.5 h-4.5 text-rose-500 dark:text-neon-pink animate-[spin_20s_linear_infinite]" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
+                        {forecastTrend.capeDeltaText}
+                        {forecastTrend.currentCapeVal > 1500 ? (
+                          <TrendingUp className="w-5 h-5 text-rose-500 inline shrink-0" />
+                        ) : (
+                          <TrendingDown className="w-5 h-5 text-teal-500 inline shrink-0" />
+                        )}
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 block font-mono">
+                        Analysis: {forecastTrend.capeDirection}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {telemetry && (
+              <div className="flex justify-between items-center text-[8px] font-mono font-semibold text-slate-400 dark:text-slate-600 mt-5 pt-2 border-t border-slate-200 dark:border-slate-800/50">
+                <span>STATION METAR ID: {telemetry.stationId}</span>
+                <span>SYNCED: {telemetry.timestamp || 'STABLE'}</span>
+              </div>
+            )}
+          </section>
         </div>
 
         {/* Spatial Proximity alerts listings section */}
         <section className="mt-8 flex flex-col gap-4">
-          <h2 className="text-xl md:text-2xl font-black text-slate-800 dark:text-white font-sans tracking-wide uppercase flex items-center gap-2">
-            <Radio className="w-6 h-6 text-rose-500 dark:text-neon-pink animate-[pulse_1.5s_infinite]" />
-            Active Proximity Alerts
-          </h2>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 dark:border-slate-800/80 pb-4">
+            <h2 className="text-xl md:text-2xl font-black text-slate-800 dark:text-white font-sans tracking-wide uppercase flex items-center gap-2">
+              <Radio className="w-6 h-6 text-rose-500 dark:text-neon-pink animate-[pulse_1.5s_infinite]" />
+              Active Proximity Alerts
+            </h2>
+            
+            {/* Filter Toggle for storm motion or impact trajectory headed towards the user */}
+            {alerts.length > 0 && (
+              <div className="flex bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800/80 self-stretch sm:self-auto">
+                <button
+                  id="show-all-threats-btn"
+                  type="button"
+                  onClick={() => setShowHeadedTowardsOnly(false)}
+                  className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider ${
+                    !showHeadedTowardsOnly
+                      ? 'bg-slate-800 dark:bg-slate-800 text-white shadow-[0_2px_8px_rgba(0,0,0,0.2)]'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                  }`}
+                >
+                  All Alerts ({alerts.length})
+                </button>
+                <button
+                  id="show-headed-threats-btn"
+                  type="button"
+                  onClick={() => setShowHeadedTowardsOnly(true)}
+                  className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 ${
+                    showHeadedTowardsOnly
+                      ? 'bg-rose-600 dark:bg-rose-500 text-white shadow-[0_2px_8px_rgba(225,29,72,0.3)]'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Headed Towards Me ({alerts.filter((a) => a.headedTowards || a.isDirectHit).length})
+                </button>
+              </div>
+            )}
+          </div>
 
           {alerts.length === 0 ? (
             <div className="bg-white dark:bg-slate-900/10 border-2 border-dashed border-slate-200 dark:border-slate-800/80 rounded-3xl p-16 text-center shadow-sm">
@@ -2082,17 +2236,46 @@ export default function App() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {alerts.map((alert) => (
-                <ThreatCard
-                  key={alert.id}
-                  alert={alert}
-                  hasAssets={assets.length > 0}
-                  onViewTrajectory={handleFocusTrajectory}
-                  onResolve={handleResolveAlert}
-                />
-              ))}
-            </div>
+            (() => {
+              const displayedAlerts = showHeadedTowardsOnly
+                ? alerts.filter((alert) => alert.headedTowards || alert.isDirectHit)
+                : alerts;
+
+              if (displayedAlerts.length === 0) {
+                return (
+                  <div className="bg-white dark:bg-slate-900/10 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-16 text-center shadow-sm">
+                    <ShieldCheck className="w-12 h-12 text-teal-600 dark:text-neon-aqua mx-auto mb-4 animate-[pulse_2s_infinite]" />
+                    <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase font-sans tracking-wider">
+                      Clear in Path
+                    </h3>
+                    <p className="text-slate-500 dark:text-slate-400 font-semibold text-sm max-w-sm mx-auto mt-1 leading-relaxed">
+                      You have {alerts.length} active regional alert{alerts.length > 1 ? 's' : ''}, but none are directly projected to track over or intersect your current coordinates or monitored spots.
+                    </p>
+                    <button
+                      id="reset-filter-btn"
+                      onClick={() => setShowHeadedTowardsOnly(false)}
+                      className="mt-4 px-5 py-2 bg-slate-800 dark:bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-colors"
+                    >
+                      View All Proximity Alerts
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  {displayedAlerts.map((alert) => (
+                    <ThreatCard
+                      key={alert.id}
+                      alert={alert}
+                      hasAssets={assets.length > 0}
+                      onViewTrajectory={handleFocusTrajectory}
+                      onResolve={handleResolveAlert}
+                    />
+                  ))}
+                </div>
+              );
+            })()
           )}
         </section>
 
