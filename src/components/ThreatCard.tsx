@@ -37,9 +37,9 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
     } else if (isSevereThunderstorm) {
       actionText = 'PREPARE FOR IMPACT';
       actionBg = 'bg-orange-50 dark:bg-orange-955 border-2 border-orange-500 text-orange-700 dark:text-orange-200';
-      actionSubtext = 'Severe wind or hail threat imminent';
+      actionSubtext = 'Severe wind or hail threat expected';
     } else {
-      actionText = 'HAZARD IMMINENT';
+      actionText = 'WARNING ACTIVE';
       actionBg = 'bg-amber-50 dark:bg-amber-955 border border-amber-500 text-amber-700 dark:text-amber-300';
       actionSubtext = 'Storm inside your zone';
     }
@@ -49,9 +49,15 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
       actionBg = 'bg-red-50 dark:bg-red-955 border border-red-500 text-red-750 dark:text-red-200';
       actionSubtext = `Storm heading towards you, ETA: ${etaMinutes || 'Calculating'} mins`;
     } else {
-      actionText = 'IMMINENT REGIONAL THREAT';
-      actionBg = 'bg-slate-50 dark:bg-slate-900 border border-amber-400 dark:border-amber-500 text-amber-700 dark:text-amber-200';
-      actionSubtext = 'Severe convective cell within 25 miles';
+      if (isTornado) {
+        actionText = 'IMMINENT REGIONAL THREAT';
+        actionBg = 'bg-slate-50 dark:bg-slate-900 border border-amber-400 dark:border-amber-500 text-amber-700 dark:text-amber-200';
+        actionSubtext = 'Tornadic structure/threat within 25 miles';
+      } else {
+        actionText = 'REGIONAL WEATHER ALERT';
+        actionBg = 'bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300';
+        actionSubtext = 'Severe convective cell within 25 miles';
+      }
     }
   } else if (minDist <= 50) {
     actionText = 'CLOSED INTERVAL WARNING';
