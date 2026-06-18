@@ -44,20 +44,36 @@ export const cardinalBearings: Record<string, number> = {
   NNW: 337.5,
 };
 
-export function isPointInPolygon(lat: number, lon: number, polygon: [number, number][]): boolean {
-  let inside = false;
-  // standard ray casting: polygon is an array of [lon, lat] coordinate pairs
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][0]; // lon
-    const yi = polygon[i][1]; // lat
-    const xj = polygon[j][0]; // lon
-    const yj = polygon[j][1]; // lat
+function isLeft(x1: number, y1: number, x2: number, y2: number, px: number, py: number): number {
+  return (x2 - x1) * (py - y1) - (px - x1) * (y2 - y1);
+}
 
-    const intersect =
-      yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
+export function isPointInPolygon(lat: number, lon: number, polygon: [number, number][]): boolean {
+  if (!polygon || polygon.length < 3) return false;
+  let wn = 0; // Winding number counter
+
+  for (let i = 0; i < polygon.length; i++) {
+    const nextIdx = (i + 1) % polygon.length;
+    const x1 = polygon[i][0]; // lon
+    const y1 = polygon[i][1]; // lat
+    const x2 = polygon[nextIdx][0]; // lon
+    const y2 = polygon[nextIdx][1]; // lat
+
+    if (y1 <= lat) {
+      if (y2 > lat) { // Upward crossing
+        if (isLeft(x1, y1, x2, y2, lon, lat) > 0) {
+          wn++;
+        }
+      }
+    } else {
+      if (y2 <= lat) { // Downward crossing
+        if (isLeft(x1, y1, x2, y2, lon, lat) < 0) {
+          wn--;
+        }
+      }
+    }
   }
-  return inside;
+  return wn !== 0;
 }
 
 export function getMinPolygonDistance(
@@ -274,18 +290,31 @@ export function parseSPCLatLon(text: string): { lat: number; lon: number }[] {
 }
 
 export function isPointInParsedPolygon(lat: number, lon: number, polygon: { lat: number; lon: number }[]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].lon;
-    const yi = polygon[i].lat;
-    const xj = polygon[j].lon;
-    const yj = polygon[j].lat;
+  if (!polygon || polygon.length < 3) return false;
+  let wn = 0; // Winding number counter
 
-    const intersect =
-      yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
+  for (let i = 0; i < polygon.length; i++) {
+    const nextIdx = (i + 1) % polygon.length;
+    const x1 = polygon[i].lon;
+    const y1 = polygon[i].lat;
+    const x2 = polygon[nextIdx].lon;
+    const y2 = polygon[nextIdx].lat;
+
+    if (y1 <= lat) {
+      if (y2 > lat) { // Upward crossing
+        if (isLeft(x1, y1, x2, y2, lon, lat) > 0) {
+          wn++;
+        }
+      }
+    } else {
+      if (y2 <= lat) { // Downward crossing
+        if (isLeft(x1, y1, x2, y2, lon, lat) < 0) {
+          wn--;
+        }
+      }
+    }
   }
-  return inside;
+  return wn !== 0;
 }
 
 export function getParsedPolygonMinDistance(

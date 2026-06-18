@@ -48,18 +48,22 @@ body {
 
 /* Original head text overrides */
 h1 {
+  color: white;
   text-shadow: 0 0 10px #ff69b4, 0 0 20px #00ffff;
 }
 
 h2 {
+  color: white;
   text-shadow: 0 0 10px #ff69b4, 0 0 20px #00ffff;
 }
 
 h3, h4 {
+  color: white;
   text-shadow: 0 0 5px rgba(75, 0, 130, 0.2);
 }
 
 .dark h3, .dark h4 {
+  color: white;
   text-shadow: 0 0 5px #4b0082;
 }
 

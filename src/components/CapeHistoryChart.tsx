@@ -1,6 +1,7 @@
 import React from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts';
 import { ShieldAlert, Info, TrendingUp, Sparkles, Activity } from 'lucide-react';
+import SafeResponsiveContainer from './SafeResponsiveContainer';
 
 interface CapeHistoryPoint {
   time: string;
@@ -102,7 +103,7 @@ export default function CapeHistoryChart({ history, currentCape, loading }: Cape
       {/* Recharts Area Chart */}
       <div className="h-32 w-full mt-2 select-none">
         {history && history.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%">
+          <SafeResponsiveContainer minWidth={100} minHeight={128} loadingLabel="CALIBRATING CAPE GRID VIEWPORT...">
             <AreaChart
               data={history}
               margin={{ top: 5, right: 10, left: -25, bottom: 0 }}
@@ -175,7 +176,7 @@ export default function CapeHistoryChart({ history, currentCape, loading }: Cape
                 activeDot={{ r: 4, strokeWidth: 0, fill: '#22d3ee' }}
               />
             </AreaChart>
-          </ResponsiveContainer>
+          </SafeResponsiveContainer>
         ) : (
           <div className="h-full flex items-center justify-center text-slate-400 font-mono text-[9px] uppercase border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
             Insufficent history points to plot trend

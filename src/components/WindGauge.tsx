@@ -42,12 +42,16 @@ export default function WindGauge({ windSpeed, windGust }: WindGaugeProps) {
   // Gust Arc (Outer ring)
   const outerRadius = 88;
   const gustArcBg = describeArc(centerX, centerY, outerRadius, 0, 180);
-  const gustArcFill = gustAngle > 0 ? describeArc(centerX, centerY, outerRadius, 0, gustAngle) : '';
+  const outerLength = Math.PI * outerRadius;
+  const gustFraction = Math.min(1, Math.max(0, gust / maxScale));
+  const gustDashoffset = outerLength * (1 - gustFraction);
 
   // Sustained Arc (Inner ring)
   const innerRadius = 72;
   const speedArcBg = describeArc(centerX, centerY, innerRadius, 0, 180);
-  const speedArcFill = speedAngle > 0 ? describeArc(centerX, centerY, innerRadius, 0, speedAngle) : '';
+  const innerLength = Math.PI * innerRadius;
+  const speedFraction = Math.min(1, Math.max(0, speed / maxScale));
+  const speedDashoffset = innerLength * (1 - speedFraction);
 
   // Wind intensity assessment
   let threatLabel = "Calm / Low";
@@ -112,28 +116,34 @@ export default function WindGauge({ windSpeed, windGust }: WindGaugeProps) {
           />
 
           {/* Active Fill - Gust (Outer, Rose / neon-pink) */}
-          {gustArcFill && (
-            <path
-              d={gustArcFill}
-              fill="none"
-              stroke="#ff69b4"
-              strokeWidth="8"
-              className="stroke-neon-pink"
-              style={{ strokeLinecap: 'round', transition: 'stroke-dasharray 0.5s ease-out' }}
-            />
-          )}
+          <path
+            d={gustArcBg}
+            fill="none"
+            stroke="#ff69b4"
+            strokeWidth="8"
+            className="stroke-neon-pink"
+            style={{
+              strokeLinecap: 'round',
+              strokeDasharray: `${outerLength} ${outerLength}`,
+              strokeDashoffset: gustDashoffset,
+              transition: 'stroke-dashoffset 0.5s ease-out'
+            }}
+          />
 
           {/* Active Fill - Sustained (Inner, Cyan / neon-aqua) */}
-          {speedArcFill && (
-            <path
-              d={speedArcFill}
-              fill="none"
-              stroke="#00ffff"
-              strokeWidth="8"
-              className="stroke-neon-aqua"
-              style={{ strokeLinecap: 'round', transition: 'stroke-dasharray 0.5s ease-out' }}
-            />
-          )}
+          <path
+            d={speedArcBg}
+            fill="none"
+            stroke="#00ffff"
+            strokeWidth="8"
+            className="stroke-neon-aqua"
+            style={{
+              strokeLinecap: 'round',
+              strokeDasharray: `${innerLength} ${innerLength}`,
+              strokeDashoffset: speedDashoffset,
+              transition: 'stroke-dashoffset 0.5s ease-out'
+            }}
+          />
 
           {/* Center Digital Readout */}
           <text

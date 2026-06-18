@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { LocationAsset, NWSAlert, MesoscaleDiscussion, RotationPin } from '../types';
 import { getDistance, getBearing, getGeometryCentroid, getMemoizedMinPolygonDistance } from '../utils/geoUtils';
 import { Compass, Eye, Shield, MapPin, Layers, RefreshCcw, Globe, CloudRain, Wind, Search, Navigation, Info } from 'lucide-react';
+import { useWindyFailsafe } from '../utils/useWindyFailsafe';
 
 // Helper to convert cardinal directions or degrees into azimuth bearing degrees
 function getDegreesFromDirection(dirStr: string): number | null {
@@ -119,6 +120,7 @@ interface RadarMapProps {
   mapMode: 'satellite' | 'radar' | 'wind';
   onMapModeChange: (mode: 'satellite' | 'radar' | 'wind') => void;
   onSetCoordinates?: (lat: number, lon: number) => void;
+  customMapKey?: string;
 }
 
 declare global {
@@ -142,6 +144,7 @@ export default function RadarMap({
   mapMode,
   onMapModeChange,
   onSetCoordinates,
+  customMapKey,
 }: RadarMapProps) {
   const [apiLoaded, setApiLoaded] = useState<boolean>(false);
   const [initError, setInitError] = useState<boolean>(false);
@@ -165,6 +168,16 @@ export default function RadarMap({
   const assetMarkersRef = useRef<any[]>([]);
   const alertMarkersRef = useRef<any[]>([]);
   const lastSetCoordinatesRef = useRef<{ lat: number; lon: number } | null>(null);
+
+  const {
+    notification: failsafeNotification,
+    transitionMapMode,
+    clearNotification: clearFailsafeNotification,
+  } = useWindyFailsafe(
+    windyStoreRef.current,
+    onMapModeChange,
+    windyMapRef
+  );
 
   // Trigger brief transition visual state when mapMode changes
   useEffect(() => {
@@ -253,7 +266,7 @@ export default function RadarMap({
     }
 
     try {
-      const windyKey = (import.meta as any).env?.VITE_WINDY_MAP_KEY || 'KvQl4qaj2eO8bFGJySVskrZhpgYaMfqQ';
+      const windyKey = customMapKey || localStorage.getItem('daisy-windy-map-key') || (import.meta as any).env?.VITE_WINDY_MAP_KEY || 'KvQl4qaj2eO8bFGJySVskrZhpgYaMfqQ';
       const options = {
         // Provided valid developer Map Forecast Windy API key or user dynamic override
         key: windyKey,
@@ -283,7 +296,7 @@ export default function RadarMap({
     return () => {
       cleanupInteractiveElements();
     };
-  }, [apiLoaded, initError]);
+  }, [apiLoaded, initError, customMapKey]);
 
   // Sync Map Overlay Mode instantly (no reload!)
   useEffect(() => {
@@ -329,8 +342,20 @@ export default function RadarMap({
       }
     } else {
       try {
-        fallbackMapRef.current.setView([userLat, userLon], assets.length > 0 ? 8 : 6);
-      } catch (e) {}
+        const currentCenter = fallbackMapRef.current.getCenter();
+        const dist = Math.sqrt(
+          Math.pow(currentCenter.lat - userLat, 2) + 
+          Math.pow(currentCenter.lng - userLon, 2)
+        );
+        // Only setView if target coordinate is significantly shifted (e.g. searching a new location)
+        if (dist > 0.05) {
+          fallbackMapRef.current.setView([userLat, userLon], assets.length > 0 ? 8 : 6);
+        }
+      } catch (e) {
+        try {
+          fallbackMapRef.current.setView([userLat, userLon], assets.length > 0 ? 8 : 6);
+        } catch (err) {}
+      }
     }
 
     return () => {
@@ -1101,7 +1126,7 @@ export default function RadarMap({
         <div className="flex flex-wrap gap-1.5 bg-white dark:bg-slate-950 p-1 rounded-full border border-slate-200 dark:border-slate-800 transition-colors">
           <button
             id="satellite-mode-btn"
-            onClick={() => onMapModeChange('satellite')}
+            onClick={() => transitionMapMode('satellite')}
             className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${
               mapMode === 'satellite'
                 ? 'bg-slate-100 dark:bg-slate-850 border border-indigo-500/20 dark:border-indigo-500/40 text-indigo-600 dark:text-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.15)] dark:shadow-[0_0_8px_rgba(99,102,241,0.2)]'
@@ -1114,10 +1139,10 @@ export default function RadarMap({
 
           <button
             id="radar-mode-btn"
-            onClick={() => onMapModeChange('radar')}
+            onClick={() => transitionMapMode('radar')}
             className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${
               mapMode === 'radar'
-                ? 'bg-slate-100 dark:bg-slate-850 border border-neon-aqua/20 dark:border-neon-aqua/40 text-cyan-600 dark:text-neon-aqua shadow-[0_0_8px_rgba(0,255,255,0.15)] dark:shadow-[0_0_8px_rgba(0,255,255,0.2)]'
+                ? 'bg-slate-100 dark:bg-slate-855 border border-neon-aqua/20 dark:border-neon-aqua/40 text-cyan-600 dark:text-neon-aqua shadow-[0_0_8px_rgba(0,255,255,0.15)] dark:shadow-[0_0_8px_rgba(0,255,255,0.2)]'
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
             }`}
           >
@@ -1127,7 +1152,7 @@ export default function RadarMap({
           
           <button
             id="wind-mode-btn"
-            onClick={() => onMapModeChange('wind')}
+            onClick={() => transitionMapMode('wind')}
             className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${
               mapMode === 'wind'
                 ? 'bg-slate-100 dark:bg-slate-850 border border-neon-pink/20 dark:border-neon-pink/40 text-rose-500 dark:text-neon-pink shadow-[0_0_8px_rgba(255,105,180,0.15)] dark:shadow-[0_0_8px_rgba(255,105,180,0.2)]'
@@ -1176,6 +1201,29 @@ export default function RadarMap({
       <div className={`h-[320px] md:h-[400px] w-full relative transition-all duration-300 ${
         isTransitioning ? 'brightness-95 contrast-105 saturate-125' : 'brightness-100 contrast-100 saturate-100'
       }`}>
+        {/* Failsafe Notification Toast */}
+        {failsafeNotification && failsafeNotification.visible && (
+          <div className="absolute top-16 left-3 right-3 z-[855] pointer-events-none flex justify-center">
+            <div className="bg-slate-950/95 border-2 border-rose-500/80 hover:border-emerald-500/80 rounded-xl px-4 py-3 shadow-[0_0_20px_rgba(239,68,68,0.3)] max-w-lg text-white backdrop-blur-md flex items-start gap-3 pointer-events-auto transition-all">
+              <span className="flex h-2 w-2 translate-y-1.5 rounded-full bg-rose-500 shrink-0 shadow-[0_0_8px_#ef4444] animate-ping" />
+              <div className="flex-1">
+                <div className="text-[10px] font-black uppercase tracking-wider text-rose-400 mb-0.5">
+                  ⚠️ CAPE MAP OVERLAY ENGINE
+                </div>
+                <p className="text-[9px] text-slate-300 font-semibold leading-tight font-mono uppercase tracking-tight">
+                  {failsafeNotification.message}
+                </p>
+              </div>
+              <button
+                onClick={clearFailsafeNotification}
+                className="text-[9px] font-mono hover:text-emerald-400 text-slate-500 cursor-pointer uppercase font-black bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded transition-colors self-start animate-pulse"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Mode Switching Transition Effect Overlay */}
         <div className={`absolute inset-0 bg-slate-900/40 pointer-events-none transition-all duration-300 z-[1000] backdrop-blur-sm flex items-center justify-center ${
           isTransitioning ? 'opacity-100' : 'opacity-0'

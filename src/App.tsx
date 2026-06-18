@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import * as turf from '@turf/turf';
 import {
   AreaChart,
   Area,
@@ -6,9 +7,9 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
 } from 'recharts';
-import { LocationAsset, NWSAlert, TelemetryConditions, SystemSettings, MesoscaleDiscussion, RotationPin } from './types';
+import SafeResponsiveContainer from './components/SafeResponsiveContainer';
+import { LocationAsset, NWSAlert, TelemetryConditions, SystemSettings, MesoscaleDiscussion, RotationPin, NetworkRequestLog } from './types';
 import {
   getDistance,
   getBearing,
@@ -55,6 +56,9 @@ import {
   Moon,
   TrendingUp,
   TrendingDown,
+  Cloud,
+  Terminal,
+  Key,
 } from 'lucide-react';
 
 const TRACKED_ALERTS_FILTER = [
@@ -289,6 +293,10 @@ export default function App() {
   // Main State Configuration
   const [armed, setArmed] = useState<boolean>(false);
   const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
+  const [isActivating, setIsActivating] = useState<boolean>(false);
+  const [showTermsModal, setShowTermsModal] = useState<boolean>(true);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [termsAgreed, setTermsAgreed] = useState<boolean>(false);
   
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('daisy-theme');
@@ -316,6 +324,30 @@ export default function App() {
     const raw = localStorage.getItem('daisy-alert-history');
     return raw ? JSON.parse(raw) : [];
   });
+
+  const addAlertsToHistory = (resolvedAlerts: NWSAlert[]) => {
+    if (resolvedAlerts.length === 0) return;
+    setAlertHistory((prev) => {
+      const newItems: ResolvedAlert[] = resolvedAlerts.map((alert) => ({
+        id: alert.id,
+        event: alert.event,
+        areaDesc: alert.areaDesc,
+        expires: alert.expires,
+        threatLevel: alert.threatLevel,
+        resolvedAt: new Date().toISOString(),
+        snippet: alert.snippet,
+      }));
+
+      const combined = [...newItems, ...prev];
+      const uniqueCombined = combined.filter(
+        (v, i, a) => a.findIndex((t) => t.id === v.id) === i
+      );
+
+      const sliced = uniqueCombined.slice(0, 10);
+      localStorage.setItem('daisy-alert-history', JSON.stringify(sliced));
+      return sliced;
+    });
+  };
   const [discussions, setDiscussions] = useState<MesoscaleDiscussion[]>([]);
   const [rawApiDiscussions, setRawApiDiscussions] = useState<MesoscaleDiscussion[]>([]);
   const [customMDs, setCustomMDs] = useState<MesoscaleDiscussion[]>([]);
@@ -353,10 +385,37 @@ export default function App() {
     vibrate: true,
     flash: true,
     monitorRadius: 25,
+    telemetryDebug: false,
   });
+
+  // Custom user-managed API keys
+  const [customPointKey, setCustomPointKey] = useState<string>(() => localStorage.getItem('daisy-windy-point-key') || '');
+  const [customMapKey, setCustomMapKey] = useState<string>(() => localStorage.getItem('daisy-windy-map-key') || '');
+  const [showKeysPanel, setShowKeysPanel] = useState<boolean>(false);
+
+  // Network logs for diagnostics and troubleshooting
+  const [networkLogs, setNetworkLogs] = useState<NetworkRequestLog[]>([]);
+  const [windyPointError, setWindyPointError] = useState<{
+    status: number;
+    message: string;
+    suggestion?: string;
+    linkText?: string;
+    linkUrl?: string;
+  } | null>(null);
+
+  const logNetworkRequest = (log: Omit<NetworkRequestLog, 'id' | 'timestamp'>) => {
+    const newLog: NetworkRequestLog = {
+      ...log,
+      id: Math.random().toString(36).substring(2, 11),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    };
+    setNetworkLogs(prev => [newLog, ...prev].slice(0, 5));
+  };
+
 
   // PWA deferred installation prompt
   const [pwaPrompt, setPwaPrompt] = useState<any>(null);
+  const [showInstallGuide, setShowInstallGuide] = useState<boolean>(false);
 
   // Potential rotation pins state derived from active alerts
   const [rotationPins, setRotationPins] = useState<RotationPin[]>([]);
@@ -384,6 +443,9 @@ export default function App() {
 
   // Signatures tracking to detect fresh alerts (Toast notifications)
   const previousSignaturesRef = useRef<Set<string>>(new Set());
+
+  // Centroid tracking for warning polygon shrinkage and velocity vector calculation
+  const alertsCentroidsHistoryRef = useRef<Record<string, { lat: number; lon: number; timestamp: number }>>({});
 
   // Restore/Sync stored assets
   useEffect(() => {
@@ -417,50 +479,6 @@ export default function App() {
     setPressureHistory([]);
   }, [telemetry?.stationId]);
 
-  // Handle barometric pressure trend tracking (last 6 polls)
-  // Seeds a slight dropping trend initially to allow direct analysis of storm intensity indicators
-  useEffect(() => {
-    if (!telemetry?.pressure) return;
-    const livePressureNum = parseFloat(telemetry.pressure);
-    if (isNaN(livePressureNum)) return;
-
-    if (pressureHistory.length === 0) {
-      const now = new Date();
-      const historicalPoints = [];
-      for (let i = 5; i > 0; i--) {
-        const pastTime = new Date(now.getTime() - i * 60000);
-        const formattedTime = pastTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        // Model a subtle downward barometric drift representing severe storm entry profile
-        const simulatedPressure = parseFloat((livePressureNum + i * 0.02).toFixed(2));
-        historicalPoints.push({
-          time: formattedTime,
-          pressure: simulatedPressure
-        });
-      }
-      const currentFormatted = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      setPressureHistory([...historicalPoints, { time: currentFormatted, pressure: livePressureNum }]);
-    } else {
-      const lastPoint = pressureHistory[pressureHistory.length - 1];
-      const now = new Date();
-      const currentFormatted = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-      // Append new point if we have a fresh polling timestamp minutes bucket
-      if (lastPoint.time !== currentFormatted) {
-        setPressureHistory((prev) => {
-          const updated = [...prev, { time: currentFormatted, pressure: livePressureNum }];
-          return updated.slice(-6);
-        });
-      } else if (lastPoint.pressure !== livePressureNum) {
-        // Otherwise just update the latest value on same-minute ticks
-        setPressureHistory((prev) => {
-          const updated = [...prev];
-          updated[updated.length - 1] = { time: currentFormatted, pressure: livePressureNum };
-          return updated;
-        });
-      }
-    }
-  }, [telemetry?.pressure, telemetry?.stationId]);
-
   // Sirens trigger lifecycle sync
   useEffect(() => {
     if (!armed) {
@@ -492,7 +510,7 @@ export default function App() {
     }
   }, [alerts, armed, settings.audio, settings.vibrate, settings.monitorRadius]);
 
-  // Periodic Alert Syncing Loop (60s cycle)
+  // Periodic Alert Syncing Loop (Staggered Telemetry/NWS intervals)
   useEffect(() => {
     if (!armed) return;
 
@@ -500,17 +518,48 @@ export default function App() {
     fetchTelemetry(currentLat, currentLon);
     fetchMesoscaleDiscussions();
 
-    const interval = setInterval(() => {
+    // 60-second polling cycle for alerts and mesoscale discussions
+    const alertInterval = setInterval(() => {
       fetchNationalAlerts();
-      fetchTelemetry(currentLat, currentLon);
       fetchMesoscaleDiscussions();
     }, 60000);
 
+    // 5-minute (300-second) cycle for CAPE and weather telemetry
+    const telemetryInterval = setInterval(() => {
+      fetchTelemetry(currentLat, currentLon);
+    }, 300000);
+
     return () => {
-      clearInterval(interval);
+      clearInterval(alertInterval);
+      clearInterval(telemetryInterval);
       siren.stop();
     };
-  }, [armed]);
+  }, [armed, currentLat, currentLon]);
+
+  // Stable ref for adding alerts to history to avoid interval stale closures
+  const addAlertsToHistoryRef = useRef(addAlertsToHistory);
+  useEffect(() => {
+    addAlertsToHistoryRef.current = addAlertsToHistory;
+  }, [addAlertsToHistory]);
+
+  // Auto-resolve expired alerts locally
+  useEffect(() => {
+    const checkExpiredAlerts = () => {
+      const now = new Date();
+      setAlerts((prevAlerts) => {
+        const expired = prevAlerts.filter((alert) => alert.expires && new Date(alert.expires) <= now);
+        if (expired.length > 0) {
+          addAlertsToHistoryRef.current(expired);
+          triggerToast(`${expired.length} threat${expired.length > 1 ? "s" : ""} expired and archived.`, "info");
+          return prevAlerts.filter((alert) => !alert.expires || new Date(alert.expires) > now);
+        }
+        return prevAlerts;
+      });
+    };
+
+    const interval = setInterval(checkExpiredAlerts, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Perform purely local geometric calculations for discussions on coordinate or custom changes without redundant network requests
   useEffect(() => {
@@ -556,17 +605,25 @@ export default function App() {
   // Core NWS Alert Acquisition Engine (Layer 1 The Alarm)
   const fetchNationalAlerts = async () => {
     setSyncStatus('SYNCING...');
-    try {
-      // Fetch filtered list of alerts based on tracked conditions
-      const encodedEvents = TRACKED_ALERTS_FILTER.map((e) => encodeURIComponent(e)).join(',');
-      const nwsUrl = `https://api.weather.gov/alerts/active?event=${encodedEvents}`;
+    const encodedEvents = TRACKED_ALERTS_FILTER.map((e) => encodeURIComponent(e)).join(',');
+    const nwsUrl = `https://api.weather.gov/alerts/active?event=${encodedEvents}`;
+    const headers = {
+      'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)',
+      'Accept': 'application/geo+json'
+    };
 
-      const res = await fetch(nwsUrl, {
-        headers: {
-          'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)',
-          'Accept': 'application/geo+json'
-        }
+    try {
+      const res = await fetch(nwsUrl, { headers });
+      
+      logNetworkRequest({
+        service: 'NWS',
+        url: nwsUrl,
+        method: 'GET',
+        status: res.status,
+        statusText: res.statusText || (res.ok ? 'OK' : 'Error'),
+        headers: headers
       });
+
       if (!res.ok) throw new Error(`API Error: ${res.status}`);
       
       const payload = await res.json();
@@ -574,8 +631,15 @@ export default function App() {
 
       processNWSFeatures(features);
       setSyncStatus(`LIVE: ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to acquire weather alerts:', err);
+      logNetworkRequest({
+        service: 'NWS',
+        url: nwsUrl,
+        method: 'GET',
+        error: err?.message || String(err),
+        headers: headers
+      });
       setSyncStatus('OFFLINE');
     }
   };
@@ -687,6 +751,175 @@ export default function App() {
         ? [trajectory.direction || '', String(trajectory.speed || 0), trajectory.unit || 'MPH']
         : null;
 
+      // --- INTERNAL PREDICTIVE ENGINE ENGINE MODULE V2 ---
+      // Helper to convert direction string to bearing degrees safely
+      const getDirHeadingDegrees = (dirStr: string): number | null => {
+        const clean = dirStr.trim().toUpperCase();
+        const degreeMatch = clean.match(/^(\d+)/);
+        if (degreeMatch) {
+          return parseInt(degreeMatch[1], 10) % 360;
+        }
+        const normalized = normalizeDirection(clean);
+        const bear = cardinalBearings[normalized];
+        return bear !== undefined ? bear : null;
+      };
+
+      // 1. High-Priority Tag Metadata Parsing
+      let strongSupercellUpdraft = false;
+      const hailMatch = fullText.match(/EXPECTED[\s_]HAIL[\s_]SIZE\s*:\s*([0-9.]+)/i) || 
+                        fullText.match(/HAIL\s*\.\.\.\s*([0-9.]+)\s*IN/i) || 
+                        fullText.match(/HAIL\s*SIZE\s*([0-9.]+)\s*IN/i) ||
+                        fullText.match(/HAIL\s*([0-9.]+)\s*IN/i);
+      if (hailMatch) {
+        const size = parseFloat(hailMatch[1]);
+        if (size >= 2.0) {
+          strongSupercellUpdraft = true;
+        }
+      }
+
+      let tornadoDamageThreatOnGround = false;
+      const destructiveThreatMatch = fullText.includes('TORNADO_DAMAGE_THREAT...CONSIDERABLE') || 
+                                     fullText.includes('DAMAGE THREAT...CONSIDERABLE') || 
+                                     fullText.includes('TORNADO_DAMAGE_THREAT...CATASTROPHIC') || 
+                                     fullText.includes('DAMAGE THREAT...CATASTROPHIC') || 
+                                     fullText.includes('TORNADO EMERGENCY') ||
+                                     fullText.includes('CATASTROPHIC DAMAGE THREAT');
+      if (destructiveThreatMatch) {
+        tornadoDamageThreatOnGround = true;
+      }
+
+      // 2. Warning Polygon Centroid tracking shift vector (Shrinkage & Evolution)
+      let polygonCentroidShiftVector: { dir: string; speed: number; bearing: number } | null = null;
+      if (feature.geometry && feature.geometry.coordinates) {
+        const currentCentroid = getGeometryCentroid(feature.geometry.coordinates);
+        if (currentCentroid && props.id) {
+          const prev = alertsCentroidsHistoryRef.current[props.id];
+          const nowMs = Date.now();
+          if (prev) {
+            const distMiles = getDistance(prev.lat, prev.lon, currentCentroid.lat, currentCentroid.lon);
+            const timeHours = (nowMs - prev.timestamp) / 3600000;
+            // Shifting centroids of NWS active alerts happen after consecutive polls (spaced overlay)
+            if (timeHours > 0.005 && distMiles > 0.01 && distMiles < 10) {
+              const speedMph = distMiles / timeHours;
+              const bearingDeg = getBearing(prev.lat, prev.lon, currentCentroid.lat, currentCentroid.lon);
+              
+              // Normalize bearing into standard cardinal key
+              let closestDir = 'EAST';
+              let minDiff = 360;
+              Object.entries(cardinalBearings).forEach(([name, deg]) => {
+                const diff = Math.min(Math.abs(bearingDeg - deg), 360 - Math.abs(bearingDeg - deg));
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  closestDir = name;
+                }
+              });
+
+              if (speedMph >= 10 && speedMph <= 120) {
+                polygonCentroidShiftVector = {
+                  dir: closestDir,
+                  speed: Math.round(speedMph),
+                  bearing: Math.round(bearingDeg)
+                };
+              }
+            }
+          }
+          // Update historical logs for this alert ID
+          alertsCentroidsHistoryRef.current[props.id] = {
+            lat: currentCentroid.lat,
+            lon: currentCentroid.lon,
+            timestamp: nowMs
+          };
+        }
+      }
+
+      // 3. Turf.js Advanced Spatial Upstream Buffering
+      let convectiveIntensificationDetected = false;
+      try {
+        if (feature.geometry && (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon')) {
+          // Identify environment instability from local database of conditions
+          const curCapeVal = forecastTrend?.currentCapeVal || 0;
+          const isCapeHigh = curCapeVal > 1500 || forecastTrend?.capeDirection === 'Increasing Instability' || fullText.includes('CAPE');
+          
+          const activeVector = polygonCentroidShiftVector || (vectorMatch ? {
+            dir: vectorMatch[0],
+            speed: parseInt(vectorMatch[1], 10),
+            bearing: getDirHeadingDegrees(vectorMatch[0])
+          } : null);
+
+          if (isCapeHigh && activeVector && activeVector.bearing !== null && activeVector.speed > 0) {
+            // Project warning cell downstream along storm movement vector (45-minute path)
+            const travelDistanceMiles = activeVector.speed * 0.75;
+            const travelDistanceKm = travelDistanceMiles * 1.60934;
+
+            // Generate translated upstream buffer geometry
+            const translatedPolygon = turf.transformTranslate(feature.geometry, travelDistanceKm, activeVector.bearing);
+            
+            // Check intersection of translated polygon with saved human coordinates or asset spaces
+            if (assets.length > 0) {
+              const hasAssetOverlap = assets.some((a) => {
+                const pt = turf.point([a.lon, a.lat]);
+                return turf.booleanPointInPolygon(pt, translatedPolygon as any);
+              });
+              if (hasAssetOverlap) {
+                convectiveIntensificationDetected = true;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Predictive Engine: Spatial Upstream Buffering Fail]', e);
+      }
+
+      // 4. Fusing Live Radar Precursors
+      const velocityCoupletPersistentShear = fullText.includes('ROTATION') || 
+                                             fullText.includes('VELOCITY COUPLING') || 
+                                             fullText.includes('SHEAR') ||
+                                             fullText.includes('ROTATING');
+      
+      const hookEchoEvolutionDetected = fullText.includes('HOOK ECHO') || 
+                                        fullText.includes('HOOK') || 
+                                        fullText.includes('SUPERCELL');
+
+      const tornadoDebrisSignatureTDS = fullText.includes('DEBRIS SIGNATURE') || 
+                                         fullText.includes('TORNADO DEBRIS') || 
+                                         fullText.includes('TDS');
+
+      // 5. Compute Advanced Tornado Predictive Confidence Score
+      let predictedTornadoConfidence = 0;
+      const isTornadoEvent = eventName.toUpperCase().includes('TORNADO');
+      const isSevereThunderstorm = eventName.toUpperCase().includes('THUNDERSTORM');
+
+      if (isTornadoEvent) {
+        predictedTornadoConfidence = 50; // Base tornado warning confidence is 50%
+        if (tornadoDebrisSignatureTDS) {
+          predictedTornadoConfidence = 100; // TDS dual-pol verification triggers 100%
+        } else {
+          if (hasObserved) predictedTornadoConfidence += 25;
+          if (velocityCoupletPersistentShear) predictedTornadoConfidence += 15;
+          if (strongSupercellUpdraft) predictedTornadoConfidence += 10;
+        }
+      } else if (isSevereThunderstorm) {
+        if (strongSupercellUpdraft) predictedTornadoConfidence += 20;
+        if (velocityCoupletPersistentShear) predictedTornadoConfidence += 15;
+        if (convectiveIntensificationDetected) {
+          predictedTornadoConfidence += 30; // Tracks directly into environmental instability gradients
+        }
+      }
+      predictedTornadoConfidence = Math.min(100, Math.max(0, predictedTornadoConfidence));
+
+      // 6. Issue automated early localized trigger warnings on high-value hazard threats
+      if (convectiveIntensificationDetected && velocityCoupletPersistentShear && !isTornadoEvent) {
+        triggerToast(
+          `⚠️ AUTOMATED PREDICTIVE WARNING: Severe convective cell tracking directly into extreme local instability. Early tornadic intensification predicted downstream.`,
+          'error'
+        );
+      } else if (tornadoDebrisSignatureTDS && isTornadoEvent) {
+        triggerToast(
+          `🌪️ HIGH CONFIDENCE TORNADO DISPATCH: Doppler Radar and Dual-Pol correlation coefficients verify physical debris lofted. Seek shelter immediately!`,
+          'error'
+        );
+      }
+
       // Snip detailed hazard line
       let snippet = '';
       const lines = desc.split('\n');
@@ -787,7 +1020,7 @@ export default function App() {
       const isTornado = eventName.toUpperCase().includes('TORNADO');
 
       if (isWarning && (matchedInZone || shortestDistance <= 5)) {
-        if (hasEmergency || hasObserved || isDestructive || isTornado) {
+        if (hasEmergency || hasObserved || isDestructive || isTornado || predictedTornadoConfidence >= 65) {
           calculatedThreatLevel = 'Extreme';
         } else {
           calculatedThreatLevel = 'High';
@@ -837,6 +1070,15 @@ export default function App() {
         },
         justUpdated: wasUpdated,
         threatLevel: calculatedThreatLevel,
+        // Advanced Internal Prediction properties
+        predictedTornadoConfidence,
+        strongSupercellUpdraft,
+        tornadoDamageThreatOnGround,
+        polygonCentroidShiftVector,
+        convectiveIntensificationDetected,
+        velocityCoupletPersistentShear,
+        hookEchoEvolutionDetected,
+        tornadoDebrisSignatureTDS,
       });
     });
 
@@ -938,37 +1180,160 @@ export default function App() {
 
   // High-Resolution Predictive Windy Point Forecast API Query
   const fetchWindyPointTelemetry = async (lat: number, lon: number) => {
-    const windyPointKey = (import.meta as any).env?.VITE_WINDY_POINT_KEY || 'SLQqAHupkugAsBbqWw6WsFvtJZsG1B4a';
-    if (!windyPointKey) return;
+    const rawKey = (customPointKey || localStorage.getItem('daisy-windy-point-key') || (import.meta as any).env?.VITE_WINDY_POINT_KEY || 'SLQqAHupkugAsBbqWw6WsFvtJZsG1B4a');
+    const windyPointKey = typeof rawKey === 'string' ? rawKey.trim() : '';
+
+    if (!windyPointKey || windyPointKey === '') {
+      console.warn('[Telemetry Debug] Windy Point Forecast API Key is empty or missing. Skipping request.');
+      setWindyPointTelemetry(null);
+      return;
+    }
 
     setWindyPointLoading(true);
-    try {
-      const isUS = lat > 24 && lat < 50 && lon > -125 && lon < -66;
-      const model = isUS ? 'namConus' : 'gfs';
-      
-      const url = 'https://api.windy.com/api/point-forecast/v2';
-      const body = {
-        lat: lat,
-        lon: lon,
-        model: model,
-        parameters: ['temp', 'wind', 'gust', 'pressure', 'dewpoint', 'precip', 'cape'],
-        levels: ['surface'],
-        key: windyPointKey
-      };
+    const isUS = lat > 24 && lat < 50 && lon > -125 && lon < -66;
+    let model = isUS ? 'namConus' : 'gfs';
+    const url = `https://api.windy.com/api/point-forecast/v2?key=${windyPointKey}`;
+    const body = {
+      lat: lat,
+      lon: lon,
+      model: model,
+      parameters: ['temp', 'wind', 'windGust', 'pressure', 'dewpoint', 'precip', 'cape'],
+      levels: ['surface'],
+      key: windyPointKey
+    };
+    const reqHeaders = {
+      'Content-Type': 'application/json',
+      'x-api-key': windyPointKey,
+      'key': windyPointKey
+    };
 
-      const res = await fetch(url, {
+    try {
+      if (settings.telemetryDebug) {
+        console.log('[Telemetry Debug] Initiating Windy Forecast Query', {
+          timestamp: new Date().toISOString(),
+          endpoint: url,
+          requestPayload: body
+        });
+      }
+
+      let res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: reqHeaders,
         body: JSON.stringify(body)
       });
 
+      // Self-healing fallback: if model-specific request (e.g. namConus) fails, retry using the universal 'gfs' model
+      if (!res.ok && model !== 'gfs') {
+        const errTxt = await res.clone().text().catch(() => '');
+        console.warn(`Windy API model '${model}' rejected (Status ${res.status}: ${errTxt}). Falling back to 'gfs'...`);
+        
+        if (settings.telemetryDebug) {
+          console.warn('[Telemetry Debug] Model specific request failed, falling back to gfs', {
+            timestamp: new Date().toISOString(),
+            status: res.status,
+            error: errTxt
+          });
+        }
+
+        // Track this model fallback in networkLogs
+        logNetworkRequest({
+          service: 'Windy',
+          url: `https://api.windy.com/api/point-forecast/v2?model-fallback=gfs`,
+          method: 'POST',
+          status: res.status,
+          statusText: `Fallback from ${model}`,
+          headers: reqHeaders,
+          error: `Model '${model}' failed: ${errTxt}`
+        });
+
+        model = 'gfs';
+        body.model = 'gfs';
+        res = await fetch(`https://api.windy.com/api/point-forecast/v2?key=${windyPointKey}`, {
+          method: 'POST',
+          headers: reqHeaders,
+          body: JSON.stringify(body)
+        });
+      }
+
       if (!res.ok) {
-        throw new Error(`Status ${res.status}`);
+        const errText = await res.text().catch(() => 'No further details provided');
+        
+        const is400 = res.status === 400;
+        let suggestion = '';
+        if (is400) {
+          suggestion = `Your Windy API key may lack point-forecast privileges or permission for active model '${model}'. Ensure key has appropriate subscriptions on Windy portal.`;
+          
+          // Explicitly log the full request URL and headers whenever a 400 error occurs
+          console.error('[Telemetry 400 Bad Request Error]', {
+            timestamp: new Date().toISOString(),
+            status: res.status,
+            url: url,
+            headers: reqHeaders,
+            payload: body,
+            responseError: errText
+          });
+        } else {
+          if (settings.telemetryDebug) {
+            console.error('[Telemetry Debug] Windy Forecast Query Failed', {
+              timestamp: new Date().toISOString(),
+              status: res.status,
+              error: errText
+            });
+          }
+        }
+
+        logNetworkRequest({
+          service: 'Windy',
+          url: `https://api.windy.com/api/point-forecast/v2?key=`,
+          method: 'POST',
+          status: res.status,
+          statusText: res.statusText || 'Bad Request',
+          headers: reqHeaders,
+          error: errText,
+          suggestedAction: is400 ? `Check permissions for model '${model}'. Verify usage limits on Windy portal.` : undefined
+        });
+
+        if (is400) {
+          setWindyPointError({
+            status: 400,
+            message: `Bad Request (400): ${errText}`,
+            suggestion: `The key might not have permission to fetch model '${model}' point forecasts. Default keys have strict model limits (e.g. gfs only).`,
+            linkText: "Windy Account API Keys Portal",
+            linkUrl: "https://api.windy.com/keys"
+          });
+          triggerToast(`Windy API 400: Your key might lack permissions for point forecast model ${model}.`, 'error');
+        } else {
+          setWindyPointError({
+            status: res.status,
+            message: `API Error ${res.status}: ${errText}`
+          });
+        }
+
+        throw new Error(`Status ${res.status} - Details: ${errText}`);
       }
 
       const data = await res.json();
+      setWindyPointError(null); // Clear any pending errors on successful query
+
+      logNetworkRequest({
+        service: 'Windy',
+        url: `https://api.windy.com/api/point-forecast/v2`,
+        method: 'POST',
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          'Content-Type': 'application/json',
+          'model-requested': model
+        }
+      });
+
+      if (settings.telemetryDebug) {
+        console.log('[Telemetry Debug] Windy Forecast Query Successful', {
+          timestamp: new Date().toISOString(),
+          responseStatus: res.status,
+          responsePayload: data
+        });
+      }
       
       if (data && data.ts && data.ts.length > 0) {
         const nowMs = Date.now();
@@ -992,8 +1357,14 @@ export default function App() {
         };
 
         const parseWindToMph = (val: number | undefined) => {
-          if (val === undefined) return undefined;
-          return (val * 2.23694).toFixed(0);
+          if (val === undefined || val === null || isNaN(val)) return undefined;
+          const mph = val * 2.23694;
+          // Filter out physically impossible values (supersonic wind or sensor anomalies, e.g. > 250 mph)
+          if (mph > 250 || mph < 0) {
+            console.warn(`[Windy Point Telemetry] Discarding physically impossible wind reading: ${mph.toFixed(1)} mph (${val} m/s)`);
+            return undefined;
+          }
+          return mph.toFixed(0);
         };
 
         const parsePaToInHg = (val: number | undefined) => {
@@ -1004,7 +1375,7 @@ export default function App() {
         const tempVal = data['temp-surface']?.[closestIndex];
         const dewVal = data['dewpoint-surface']?.[closestIndex];
         const windVal = data['wind-surface']?.[closestIndex];
-        const gustVal = data['gust-surface']?.[closestIndex];
+        const gustVal = data['windGust-surface']?.[closestIndex] || data['gust-surface']?.[closestIndex];
         const pressureVal = data['pressure-surface']?.[closestIndex];
         const capeVal = data['cape-surface']?.[closestIndex];
         const precipVal = data['precip-surface']?.[closestIndex];
@@ -1093,11 +1464,100 @@ export default function App() {
       } else {
         setWindyPointTelemetry(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Silent fallback: Windy Point Forecast API query failed', err);
+      if (settings.telemetryDebug) {
+        console.error('[Telemetry Debug] Caught Windy Point Forecast service error', {
+          timestamp: new Date().toISOString(),
+          error: err?.message || String(err)
+        });
+      }
       setWindyPointTelemetry(null);
     } finally {
       setWindyPointLoading(false);
+    }
+  };
+
+  // Fetch National Weather Service grid forecast details
+  const fetchNWSForecast = async (lat: number, lon: number) => {
+    try {
+      const forecastCacheKey = `fc_${lat.toFixed(2)}_${lon.toFixed(2)}`;
+      let forecastUrl = resolvedStationsRef.current[forecastCacheKey];
+      const headers = {
+        'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
+      };
+
+      if (!forecastUrl) {
+        const pointsUrl = `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`;
+        const ptRes = await fetch(pointsUrl, { headers });
+
+        logNetworkRequest({
+          service: 'NWS',
+          url: pointsUrl,
+          method: 'GET',
+          status: ptRes.status,
+          statusText: ptRes.ok ? 'OK' : 'Error',
+          headers: headers
+        });
+
+        if (!ptRes.ok) return null;
+
+        const ptData = await ptRes.json();
+        forecastUrl = ptData.properties?.forecast;
+        if (forecastUrl) {
+          resolvedStationsRef.current[forecastCacheKey] = forecastUrl;
+        }
+      }
+
+      if (!forecastUrl) return null;
+
+      const fcRes = await fetch(forecastUrl, { headers });
+      logNetworkRequest({
+        service: 'NWS',
+        url: forecastUrl,
+        method: 'GET',
+        status: fcRes.status,
+        statusText: fcRes.ok ? 'OK' : 'Error',
+        headers: headers
+      });
+
+      if (!fcRes.ok) return null;
+
+      const fcData = await fcRes.json();
+      const periods = fcData.properties?.periods || [];
+
+      let highTemp: number | undefined;
+      let lowTemp: number | undefined;
+      let probPrecip: number | undefined;
+
+      // Extract high/low from upcoming periods
+      periods.slice(0, 3).forEach((p: any) => {
+        if (p.isDaytime && highTemp === undefined) {
+          highTemp = p.temperature;
+        }
+        if (!p.isDaytime && lowTemp === undefined) {
+          lowTemp = p.temperature;
+        }
+      });
+
+      // Find max probability of precipitation within the upcoming periods
+      periods.slice(0, 3).forEach((p: any) => {
+        const popVal = p.probabilityOfPrecipitation?.value;
+        if (popVal !== null && popVal !== undefined) {
+          if (probPrecip === undefined || popVal > probPrecip) {
+            probPrecip = popVal;
+          }
+        }
+      });
+
+      return {
+        highTemp: highTemp !== undefined ? `${highTemp}°F` : undefined,
+        lowTemp: lowTemp !== undefined ? `${lowTemp}°F` : undefined,
+        probPrecip: probPrecip !== undefined ? `${probPrecip}%` : '0%'
+      };
+    } catch (err) {
+      console.warn('Silent fallback: NWS forecast query failed', err);
+      return null;
     }
   };
 
@@ -1105,6 +1565,15 @@ export default function App() {
   const fetchTelemetry = async (lat: number, lon: number) => {
     // Synchronize predictive convective modeling in parallel
     fetchWindyPointTelemetry(lat, lon);
+    
+    // Fetch NWS Forecast details in parallel
+    let forecastInfo: { highTemp?: string; lowTemp?: string; probPrecip?: string } | null = null;
+    try {
+      forecastInfo = await fetchNWSForecast(lat, lon);
+    } catch (fcErr) {
+      console.warn('Silent fallback: NWS forecast fetch failed', fcErr);
+    }
+
     try {
       const stationCacheKey = `${lat.toFixed(2)}_${lon.toFixed(2)}`;
       let stationId = resolvedStationsRef.current[stationCacheKey];
@@ -1113,11 +1582,20 @@ export default function App() {
       if (!stationId) {
         // Step A: Find closest observation station endpoint (if not cached)
         const pointsUrl = `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`;
-        const ptRes = await fetch(pointsUrl, {
-          headers: {
-            'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
-          }
+        const headers = {
+          'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
+        };
+        const ptRes = await fetch(pointsUrl, { headers });
+        
+        logNetworkRequest({
+          service: 'NWS',
+          url: pointsUrl,
+          method: 'GET',
+          status: ptRes.status,
+          statusText: ptRes.statusText || (ptRes.ok ? 'OK' : 'Error'),
+          headers: headers
         });
+
         if (!ptRes.ok) return;
 
         const ptData = await ptRes.json();
@@ -1125,11 +1603,17 @@ export default function App() {
         if (!stationsUrl) return;
 
         // Step B: Grab nearest weather station identity (if not cached)
-        const stationRes = await fetch(stationsUrl, {
-          headers: {
-            'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
-          }
+        const stationRes = await fetch(stationsUrl, { headers });
+        
+        logNetworkRequest({
+          service: 'NWS',
+          url: stationsUrl,
+          method: 'GET',
+          status: stationRes.status,
+          statusText: stationRes.statusText || (stationRes.ok ? 'OK' : 'Error'),
+          headers: headers
         });
+
         if (!stationRes.ok) return;
 
         const stationData = await stationRes.json();
@@ -1149,11 +1633,20 @@ export default function App() {
 
       // Step C: Poll latest physical surface telemetry readings (always live)
       const obsUrl = `https://api.weather.gov/stations/${stationId}/observations/latest`;
-      const obsRes = await fetch(obsUrl, {
-        headers: {
-          'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
-        }
+      const obsHeaders = {
+        'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
+      };
+      const obsRes = await fetch(obsUrl, { headers: obsHeaders });
+      
+      logNetworkRequest({
+        service: 'NWS',
+        url: obsUrl,
+        method: 'GET',
+        status: obsRes.status,
+        statusText: obsRes.ok ? 'OK' : 'Error',
+        headers: obsHeaders
       });
+
       if (!obsRes.ok) return;
 
       const obsData = await obsRes.json();
@@ -1165,14 +1658,87 @@ export default function App() {
       };
 
       const mpsToMph = (val: number | null) => {
-        if (val === null) return undefined;
-        return (val * 2.23694).toFixed(0);
+        if (val === null || val === undefined || isNaN(val)) return undefined;
+        const mph = val * 2.23694;
+        // Filter out physically impossible values (supersonic wind or sensor anomalies, e.g. > 250 mph)
+        if (mph > 250 || mph < 0) {
+          console.warn(`[NWS ASOS Telemetry] Discarding physically impossible wind reading: ${mph.toFixed(1)} mph (${val} m/s)`);
+          return undefined;
+        }
+        return mph.toFixed(0);
       };
 
       const paToInHg = (val: number | null) => {
         if (val === null) return undefined;
         return (val * 0.0002953).toFixed(2);
       };
+
+      const livePressureStr = paToInHg(props.barometricPressure?.value);
+
+      // Fetch recent observations list for exact barometric historical trends (no seeding, real data only)
+      try {
+        const histUrl = `https://api.weather.gov/stations/${stationId}/observations?limit=12`;
+        const histRes = await fetch(histUrl, { headers: obsHeaders });
+        logNetworkRequest({
+          service: 'NWS',
+          url: histUrl,
+          method: 'GET',
+          status: histRes.status,
+          statusText: histRes.ok ? 'OK' : 'Error',
+          headers: obsHeaders
+        });
+
+        if (histRes.ok) {
+          const histData = await histRes.json();
+          const features = histData.features || [];
+          const pts = features
+            .map((f: any) => {
+              const p = f.properties || {};
+              const rawP = p.barometricPressure?.value;
+              const ts = p.timestamp;
+              if (rawP === null || rawP === undefined || !ts) return null;
+              const pressureInHg = parseFloat((rawP * 0.0002953).toFixed(2));
+              const d = new Date(ts);
+              const formatted = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              return {
+                time: formatted,
+                pressure: pressureInHg,
+                timestamp: d.getTime()
+              };
+            })
+            .filter((x: any) => x !== null) as { time: string; pressure: number; timestamp: number }[];
+
+          if (pts.length > 0) {
+            pts.sort((a, b) => a.timestamp - b.timestamp);
+            
+            // Deduplicate observations by time string to ensure clean viewport presentation
+            const uniquePoints: { [key: string]: { time: string; pressure: number; timestamp: number } } = {};
+            pts.forEach(pt => {
+              uniquePoints[pt.time] = pt;
+            });
+            const deduplicated = Object.values(uniquePoints).sort((a, b) => a.timestamp - b.timestamp);
+
+            const finalPoints = deduplicated.slice(-6).map(p => ({
+              time: p.time,
+              pressure: p.pressure
+            }));
+
+            setPressureHistory(finalPoints);
+          } else if (livePressureStr) {
+            const formattedNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setPressureHistory([{ time: formattedNow, pressure: parseFloat(livePressureStr) }]);
+          }
+        } else if (livePressureStr) {
+          const formattedNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setPressureHistory([{ time: formattedNow, pressure: parseFloat(livePressureStr) }]);
+        }
+      } catch (histErr) {
+        console.warn('Silent fallback: barometric observation history fetch failed', histErr);
+        if (livePressureStr) {
+          const formattedNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setPressureHistory([{ time: formattedNow, pressure: parseFloat(livePressureStr) }]);
+        }
+      }
 
       setTelemetry({
         stationId: stationId,
@@ -1182,9 +1748,12 @@ export default function App() {
         windSpeed: mpsToMph(props.windSpeed?.value),
         windGust: mpsToMph(props.windGust?.value),
         windDirection: props.windDirection?.value ? `${props.windDirection.value}°` : undefined,
-        pressure: paToInHg(props.barometricPressure?.value),
+        pressure: livePressureStr,
         textDescription: props.textDescription || undefined,
         timestamp: props.timestamp ? new Date(props.timestamp).toLocaleTimeString() : undefined,
+        highTemp: forecastInfo?.highTemp,
+        lowTemp: forecastInfo?.lowTemp,
+        probPrecip: forecastInfo?.probPrecip || '0%',
       });
     } catch (err) {
       console.warn('Silent fallback: observation telemetry unreachable', err);
@@ -1258,12 +1827,17 @@ export default function App() {
 
   // Engaging Gateway
   const handleArmActivation = () => {
-    siren.init(); // engage Web Audio context immediately inside click gesture callback
-    setShowLocationModal(true);
-  };
+    if (isActivating) return;
+    setIsActivating(true);
+    setLocationError(null);
 
-  const handleLocationAccept = () => {
-    setShowLocationModal(false);
+    // Initialize Web Audio context immediately inside user response callback for browsers compatibility
+    try {
+      siren.init();
+    } catch (err) {
+      console.warn("Siren init error:", err);
+    }
+
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
@@ -1294,56 +1868,54 @@ export default function App() {
               });
             }
           } catch (err) {
-            setAssets((prev) => [
-              ...prev,
-              { id: `current-gps`, name: 'CURRENT GPS BASE', lat, lon },
-            ]);
+            setAssets((prev) => {
+              if (prev.some((a) => Math.abs(a.lat - lat) < 0.02 && Math.abs(a.lon - lon) < 0.02)) {
+                return prev;
+              }
+              return [
+                ...prev,
+                { id: `current-gps`, name: 'CURRENT GPS BASE', lat, lon },
+              ];
+            });
           }
 
           setArmed(true);
+          setIsActivating(false);
+          setShowTermsModal(false);
+          setLocationError(null);
+          triggerToast('Precise GPS position identified. Alarms active.', 'success');
         },
-        () => {
-          // Defaults if geolocation is denied inside browser popups
+        (error) => {
+          console.warn("Geolocation precise position failed or denied. Falling back to default coordinates.", error);
+          setIsActivating(false);
           setArmed(true);
+          setShowTermsModal(false);
+          setLocationError(null);
+          triggerToast('Location query rejected. Alarms activated with default coordinates.', 'info');
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 4000,
+          maximumAge: 0
         }
       );
     } else {
+      setIsActivating(false);
       setArmed(true);
+      setShowTermsModal(false);
+      setLocationError(null);
+      triggerToast('Geolocation not supported. Alarms armed with default coordinates.', 'info');
     }
   };
 
+  const handleLocationAccept = () => {
+    handleArmActivation();
+  };
+
   const handleLocationDecline = () => {
-    setShowLocationModal(false);
-    setArmed(true);
-  };
-
-  const addAlertsToHistory = (resolvedAlerts: NWSAlert[]) => {
-    if (resolvedAlerts.length === 0) return;
-    setAlertHistory((prev) => {
-      const newItems: ResolvedAlert[] = resolvedAlerts.map((alert) => ({
-        id: alert.id,
-        event: alert.event,
-        areaDesc: alert.areaDesc,
-        expires: alert.expires,
-        threatLevel: alert.threatLevel,
-        resolvedAt: new Date().toISOString(),
-        snippet: alert.snippet,
-      }));
-
-      const combined = [...newItems, ...prev];
-      const uniqueCombined = combined.filter(
-        (v, i, a) => a.findIndex((t) => t.id === v.id) === i
-      );
-
-      const sliced = uniqueCombined.slice(0, 10);
-      localStorage.setItem('daisy-alert-history', JSON.stringify(sliced));
-      return sliced;
-    });
-  };
-
-  const handleResolveAlert = (alert: NWSAlert) => {
-    setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
-    addAlertsToHistory([alert]);
+    setIsActivating(false);
+    setLocationError("Location permission query was declined. Precise device geolocation coordinates are mandatory to use D.A.I.S.Y.");
+    triggerToast('Location permission is required to proceed.', 'error');
   };
 
   const handleClearAlertHistory = () => {
@@ -1589,6 +2161,149 @@ export default function App() {
         <GeolocationModal onAccept={handleLocationAccept} onDecline={handleLocationDecline} />
       )}
 
+      {/* PWA Saved/Install Guide Modal */}
+      {showInstallGuide && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[400] flex items-center justify-center p-6" id="pwa-install-guide">
+          <div className="bg-slate-900 border border-cyan-500/30 rounded-3xl p-8 max-w-lg w-full shadow-[0_0_30px_rgba(34,211,238,0.2)] text-white">
+            <h2 className="text-xl font-black mb-1 font-sans tracking-tight uppercase text-white flex items-center gap-2">
+              <Download className="w-5 h-5 text-neon-aqua" /> SAVE TO HOME OR WINDOWS
+            </h2>
+            <p className="text-xs text-slate-400 mb-6 font-medium">
+              Install D.A.I.S.Y. directly to your device for instant offline access and standalone storm monitoring.
+            </p>
+
+            <div className="space-y-4">
+              {/* Windows & Desktop App */}
+              <div className="bg-slate-950/40 border border-slate-800 p-4 rounded-2xl flex flex-col gap-1.5 hover:border-cyan-500/20 transition-all text-left">
+                <span className="text-[10px] font-black uppercase text-cyan-400 tracking-wider">Windows / Mac (Chrome or Edge)</span>
+                <p className="text-xs text-slate-300 font-semibold leading-relaxed">
+                  Look at the right side of your browser's address bar (URL bar). Click the installation button (or circle with arrow icon) and select <strong className="text-white">Install</strong>. D.A.I.S.Y. will run as a high-performance standalone desktop window.
+                </p>
+              </div>
+
+              {/* iOS / Apple Safari */}
+              <div className="bg-slate-950/40 border border-slate-800 p-4 rounded-2xl flex flex-col gap-1.5 hover:border-cyan-500/20 transition-all text-left">
+                <span className="text-[10px] font-black uppercase tracking-wider text-pink-400">iPhone / iPad (Apple Safari)</span>
+                <p className="text-xs text-slate-300 font-semibold leading-relaxed">
+                  Tap the browser <strong className="text-white">Share</strong> button at the bottom of Safari, scroll down, and select <strong className="text-white">Add to Home Screen</strong>.
+                </p>
+              </div>
+
+              {/* Android / Mobile Chrome */}
+              <div className="bg-slate-950/40 border border-slate-800 p-4 rounded-2xl flex flex-col gap-1.5 hover:border-cyan-500/20 transition-all text-left">
+                <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">Android (Google Chrome)</span>
+                <p className="text-xs text-slate-300 font-semibold leading-relaxed">
+                  Tap the three-dotted options button in the top right-hand corner of Chrome, then select <strong className="text-white">Install app</strong> or <strong className="text-white">Add to Home screen</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-8 flex flex-col gap-2.5">
+              {pwaPrompt && (
+                <button
+                  onClick={() => {
+                    handlePwaInstall();
+                    setShowInstallGuide(false);
+                  }}
+                  className="w-full py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black uppercase text-xs tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Download className="w-4 h-4" /> Install stand-alone app now
+                </button>
+              )}
+              <button
+                onClick={() => setShowInstallGuide(false)}
+                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold uppercase text-xs tracking-widest rounded-xl transition-colors cursor-pointer"
+              >
+                Close Guide
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Terms & Conditions Pop-Up Modal */}
+      {showTermsModal && (
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[350] flex items-center justify-center p-6" id="terms-modal">
+          <div className="bg-slate-900 border-2 border-neon-aqua rounded-3xl p-8 max-w-md w-full shadow-[0_0_25px_rgba(0,255,255,0.4)] transition-all duration-300 text-center text-white">
+            <div className="w-16 h-16 bg-slate-950 border border-neon-pink rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_15px_rgba(255,105,180,0.4)]">
+              <ShieldCheck className="w-8 h-8 text-neon-pink" />
+            </div>
+            
+            <h2 className="text-2xl font-black mb-4 font-sans tracking-wide uppercase text-white">
+              Terms & Conditions
+            </h2>
+            
+            <div className="text-slate-300 text-xs font-semibold mb-6 leading-relaxed text-left space-y-3 max-h-[200px] overflow-y-auto pr-2">
+              <p>
+                Welcome to D.A.I.S.Y. Please review our terms before proceeding:
+              </p>
+              <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 space-y-2">
+                <p className="text-[11px] leading-relaxed text-amber-400">
+                  <strong>Mandatory Geolocation Services:</strong> In order to provide active tracking and alerting of tornadoes and severe atmospheric events relative to your Safe Houses, D.A.I.S.Y. requires access to your physical geolocation context. Permission to use your geolocation is required to go any further.
+                </p>
+                <p className="text-[11px] leading-relaxed">
+                  <strong>Google Analytics Usage:</strong> We utilize Google Analytics for basic performance diagnostics and traffic monitoring to ensure tracking speed and application stability.
+                </p>
+                <p className="text-[11px] leading-relaxed">
+                  <strong>Transient State Session Limit:</strong> D.A.I.S.Y. stores monitored locations and severe weather tracking states strictly inside temporary sandboxed browser memory. Reloading or refreshing will cycle this state and reset all active alarms.
+                </p>
+              </div>
+              <p className="text-[10px] text-slate-400 font-medium">
+                This is a secondary tracking asset. Do not rely solely on this app for immediate life-safety choices in critical situations. Precise GPS base location is required.
+              </p>
+            </div>
+
+            {locationError && (
+              <div className="bg-rose-950/70 border border-rose-500/55 p-3.5 rounded-xl mb-4 text-left flex items-start gap-2.5 shadow-[0_0_15px_rgba(239,68,68,0.2)]" id="geo-error-pane">
+                <AlertOctagon className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-[11px] font-black uppercase text-rose-400 tracking-wide leading-tight mb-0.5">
+                    Geolocation Required
+                  </h3>
+                  <p className="text-[10px] leading-relaxed text-rose-100 font-medium">
+                    {locationError}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-4">
+              <label htmlFor="agree-checkbox" className="flex items-center gap-3 cursor-pointer select-none text-left bg-slate-950/40 p-3 rounded-xl border border-slate-800 hover:bg-slate-950/70 transition-colors">
+                <input
+                  type="checkbox"
+                  id="agree-checkbox"
+                  checked={termsAgreed}
+                  onChange={(e) => setTermsAgreed(e.target.checked)}
+                  disabled={isActivating}
+                  className="w-4 h-4 rounded border-slate-800 text-neon-aqua focus:ring-0 focus:ring-offset-0 bg-slate-950 accent-neon-aqua disabled:opacity-50"
+                />
+                <span className="text-[11.5px] font-bold text-slate-300 uppercase tracking-tight font-sans">
+                  i agree to the terms and geolocation requirement
+                </span>
+              </label>
+
+              <button
+                id="terms-ok-btn"
+                onClick={() => {
+                  handleArmActivation();
+                }}
+                disabled={!termsAgreed || isActivating}
+                className="w-full bg-slate-950 border border-neon-aqua text-neon-aqua font-black py-4 rounded-xl uppercase tracking-widest text-xs hover:bg-neon-aqua hover:text-slate-950 hover:shadow-[0_0_20px_rgba(0,255,255,0.6)] active:scale-95 transition-all disabled:opacity-30 disabled:pointer-events-none cursor-pointer font-sans flex items-center justify-center gap-2"
+              >
+                {isActivating ? (
+                  <>
+                    <span className="w-4 h-4 rounded-full border-2 border-neon-aqua border-t-transparent animate-spin"></span>
+                    Acquiring GPS Signal...
+                  </>
+                ) : (
+                  'Accept & Proceed'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Disarmed Splash Screen Block (Armed System Gate) */}
       {!armed && (
         <div id="armed-splash" className="fixed inset-0 bg-slate-950 z-[200] flex flex-col items-center justify-center p-6 text-center text-white">
@@ -1610,13 +2325,27 @@ export default function App() {
             Severe convective tracking and radar analysis gateway. Establishes localized siren sirens and trajectory tracking boundaries.
           </p>
 
-          <button
-            id="activate-alarms-btn"
-            onClick={handleArmActivation}
-            className="neon-border px-10 py-5 rounded-2xl text-slate-100 font-black tracking-[0.2em] text-xs uppercase cursor-pointer hover:shadow-[0_0_25px_rgba(255,105,180,0.6)] active:scale-95 transition-all text-shadow"
-          >
-            Activate Alarms
-          </button>
+          {isActivating ? (
+            <div className="flex flex-col items-center gap-3 animate-bounce mt-4 min-h-[80px] justify-center" id="activate-loading-state">
+              <Cloud className="w-12 h-12 text-cyan-400 animate-pulse drop-shadow-[0_0_15px_rgba(0,255,255,0.6)]" />
+              <span className="text-neon-pink font-mono text-[11px] uppercase tracking-[0.2em] font-black">
+                Loading...
+              </span>
+            </div>
+          ) : (
+            <button
+              id="activate-alarms-btn"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleArmActivation();
+              }}
+              className="neon-border px-10 py-5 rounded-2xl text-slate-100 font-black tracking-[0.2em] text-xs uppercase cursor-pointer hover:shadow-[0_0_25px_rgba(255,105,180,0.6)] active:scale-95 transition-all text-shadow touch-manipulation relative z-50 active:translate-y-0.5 select-none"
+              style={{ touchAction: 'manipulation' }}
+            >
+              Activate Alarms
+            </button>
+          )}
 
           {/* Secure Client Sandbox Disclaimers & Session Risk Information */}
           <div className="mt-8 max-w-md border border-slate-800 bg-slate-900/60 backdrop-blur-md rounded-2xl p-5 text-left text-xs text-slate-400 space-y-3 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
@@ -1737,6 +2466,15 @@ export default function App() {
                 {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
               </button>
 
+              <button
+                id="pwa-guide-btn"
+                onClick={() => setShowInstallGuide(true)}
+                className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:border-neon-aqua dark:hover:border-neon-aqua hover:text-neon-aqua dark:hover:text-neon-aqua rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer font-sans flex items-center justify-center gap-1.5"
+                title="App save and installation details guide"
+              >
+                <Download className="w-3.5 h-3.5" /> App Install Instructions
+              </button>
+
               {pwaPrompt && (
                 <button
                   id="install-pwa-btn"
@@ -1797,6 +2535,31 @@ export default function App() {
                 </span>
               </label>
 
+              <label className="flex items-center gap-2 text-[10px] font-black uppercase cursor-pointer tracking-wider select-none text-slate-700 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  id="settings-telemetry-debug"
+                  name="telemetryDebugToggle"
+                  checked={settings.telemetryDebug || false}
+                  onChange={(e) => setSettings((s) => ({ ...s, telemetryDebug: e.target.checked }))}
+                  className="w-4 h-4 accent-indigo-600 dark:accent-indigo-400 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
+                />
+                <span className="flex items-center gap-1">
+                  <Terminal className="w-3.5 h-3.5 text-indigo-500" />
+                  Telemetry Debug
+                </span>
+              </label>
+
+              <button
+                type="button"
+                id="toggle-keys-panel-btn"
+                onClick={() => setShowKeysPanel(prev => !prev)}
+                className={`px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:border-indigo-500 dark:hover:border-indigo-500 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer font-sans flex items-center justify-center gap-1.5`}
+              >
+                <Key className="w-3.5 h-3.5 text-indigo-500" />
+                {showKeysPanel ? 'Hide API Keys' : 'Manage API Keys'}
+              </button>
+
               {/* Monitor Radius Slider */}
               <div className="flex items-center gap-3 border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 pt-3 md:pt-0 pl-0 md:pl-5 w-full md:w-auto">
                 <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 select-none shrink-0">
@@ -1837,6 +2600,221 @@ export default function App() {
               </span>
             </div>
           </div>
+
+          {showKeysPanel && (
+            <div className="mt-4 border border-indigo-500/30 bg-indigo-50/20 dark:bg-indigo-950/10 p-5 rounded-2xl transition-all duration-300">
+              <div className="flex items-center gap-2 mb-3">
+                <Key className="w-4 h-4 text-indigo-500" />
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-100">
+                  Windy Developer API Credentials Control
+                </h3>
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug mb-4">
+                Windy.com separates their services into two completely independent Developer API Keys. Ensure you enter the correct key for each service to authorize requests successfully and see active telemetry usages on your Windy account portal.
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Windy Point Forecast Key input */}
+                <div>
+                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                    Windy Point Forecast Key (JSON Weather Data)
+                  </label>
+                  <div className="relative hover:shadow-[0_0_10px_rgba(99,102,241,0.15)] transition-shadow rounded-lg">
+                    <input
+                      type="password"
+                      placeholder="Paste your Point Forecast API key here..."
+                      value={customPointKey}
+                      onChange={(e) => setCustomPointKey(e.target.value)}
+                      className="w-full text-xs font-mono py-2 px-3 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 rounded-lg outline-none focus:border-indigo-500 focus:ring-0"
+                    />
+                  </div>
+                  <p className="text-[8px] text-slate-400 dark:text-slate-500 mt-1">
+                    Used to fetch local Convective CAPE, Pressure, Temperature, Dewpoint, and Winds.
+                  </p>
+                </div>
+
+                {/* Windy Map Key input */}
+                <div>
+                  <label className="block text-[9px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                    Windy Map Forecast Key (Interactive Map Visualizations)
+                  </label>
+                  <div className="relative hover:shadow-[0_0_10px_rgba(99,102,241,0.15)] transition-shadow rounded-lg">
+                    <input
+                      type="password"
+                      placeholder="Paste your Map Forecast API key here..."
+                      value={customMapKey}
+                      onChange={(e) => setCustomMapKey(e.target.value)}
+                      className="w-full text-xs font-mono py-2 px-3 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 rounded-lg outline-none focus:border-indigo-500 focus:ring-0"
+                    />
+                  </div>
+                  <p className="text-[8px] text-slate-400 dark:text-slate-500 mt-1">
+                    Used by Leaflet to render the high-resolution Radar, Satellite, and wind streamlines.
+                  </p>
+                </div>
+              </div>
+
+              {windyPointError && (
+                <div className="mt-4 p-4 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-200">
+                  <div className="flex items-center gap-2 font-black text-xs uppercase tracking-wider mb-1">
+                    <AlertOctagon className="w-4 h-4 text-rose-500 animate-pulse" />
+                    Windy API Point Forecast Error: {windyPointError.status}
+                  </div>
+                  <div className="text-[10px] font-mono leading-relaxed mb-3">
+                    {windyPointError.message}
+                  </div>
+                  {windyPointError.suggestion && (
+                    <div className="text-[10px] font-sans font-medium text-slate-600 dark:text-slate-400 mb-3 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 rounded-lg leading-relaxed">
+                      <span className="font-extrabold text-slate-700 dark:text-slate-300 block uppercase text-[8px] mb-1">D.A.I.S.Y. Recommended Fix:</span>
+                      {windyPointError.suggestion}
+                    </div>
+                  )}
+                  {windyPointError.linkUrl && (
+                    <a
+                      href={windyPointError.linkUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider px-3.5 py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition shadow-sm"
+                    >
+                      {windyPointError.linkText || "Visit Account Settings"}
+                    </a>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800/80 flex flex-wrap justify-between items-center gap-3">
+                <div className="text-[9px] font-mono text-slate-400 dark:text-slate-500">
+                  {(!customPointKey && !customMapKey) ? (
+                    <span className="text-amber-500">⚠ Utilizing system-wide default developer fallback credentials.</span>
+                  ) : (
+                    <span className="text-emerald-500">✓ Activating private user-managed API keys.</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.removeItem('daisy-windy-point-key');
+                      localStorage.removeItem('daisy-windy-map-key');
+                      setCustomPointKey('');
+                      setCustomMapKey('');
+                      setWindyPointError(null);
+                      triggerToast('Custom API credentials cleared. Utilizing default developer keys.', 'info');
+                    }}
+                    className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer"
+                  >
+                    Reset to Defaults
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.setItem('daisy-windy-point-key', customPointKey.trim());
+                      localStorage.setItem('daisy-windy-map-key', customMapKey.trim());
+                      triggerToast('Custom Windy developer credentials saved and mounted!', 'success');
+                      // Force local telemetry update if point keys loaded
+                      if (customPointKey.trim()) {
+                        fetchWindyPointTelemetry(currentLat, currentLon);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer shadow-sm"
+                  >
+                    Save & Validate Keys
+                  </button>
+                </div>
+              </div>
+
+              {/* Network Health Diagnostics section */}
+              <div className="mt-6 pt-5 border-t border-slate-200 dark:border-slate-800/80">
+                <div className="flex items-center justify-between gap-4 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-100">
+                      Network Health & Diagnostics Panel
+                    </h4>
+                  </div>
+                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500 font-mono">
+                    Last 5 Operations
+                  </span>
+                </div>
+                
+                <p className="text-[9px] text-slate-400 dark:text-slate-500 leading-snug mb-4 font-sans">
+                  Real-time transaction logs of server-side and API connections with the Windy.com Point Forecast networks and the National Weather Service (NWS) grid databases.
+                </p>
+                
+                {networkLogs.length === 0 ? (
+                  <div className="text-center p-6 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-[10px] text-slate-500 uppercase tracking-wider font-mono">
+                    No network transactions registered yet. Update your coordinates or run diagnostic fetches to populate reports.
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                    {networkLogs.map((log) => {
+                      const isSuccess = log.status && log.status >= 200 && log.status < 300;
+                      const isError = (log.status && log.status >= 400) || log.error;
+                      
+                      return (
+                        <div key={log.id} className="bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-850 p-3.5 rounded-xl text-left hover:border-slate-300 dark:hover:border-slate-800 transition">
+                          <div className="flex flex-wrap items-center justify-between gap-2.5 mb-2.5 font-mono text-[9px] font-black">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded uppercase tracking-wider text-[8px] text-white ${
+                                log.service === 'Windy' ? 'bg-indigo-600' : 'bg-cyan-600'
+                              }`}>
+                                {log.service}
+                              </span>
+                              <span className="text-slate-400 font-semibold">{log.timestamp}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-slate-500 uppercase">{log.method}</span>
+                              <span className={`px-2 py-0.5 rounded text-[8px] uppercase tracking-wide font-black ${
+                                isSuccess ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' :
+                                isError ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 animate-pulse' :
+                                'bg-slate-500/15 text-slate-600 dark:text-slate-400'
+                              }`}>
+                                {log.status || 'FAILED'} {log.statusText || ''}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-2 font-mono text-[9px]">
+                            <div>
+                              <span className="text-slate-400 font-black block uppercase text-[7.5px] leading-none mb-1">Request Endpoint</span>
+                              <span className="text-slate-700 dark:text-slate-300 break-all select-all font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/45 px-2 py-1 rounded block">{log.url}</span>
+                            </div>
+                            
+                            {log.headers && Object.keys(log.headers).length > 0 && (
+                              <div>
+                                <span className="text-slate-400 font-black block uppercase text-[7.5px] leading-none mb-1">Request Headers</span>
+                                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800/45 px-2 py-1.5 rounded space-y-1 block text-slate-600 dark:text-slate-400 max-h-24 overflow-y-auto">
+                                  {Object.entries(log.headers).map(([k, v]) => (
+                                    <div key={k} className="flex justify-between md:justify-start gap-4">
+                                      <span className="font-bold text-indigo-500 shrink-0">{k}:</span>
+                                      <span className="font-medium text-slate-700 dark:text-slate-300 break-all select-all">{v}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {log.error && (
+                              <div>
+                                <span className="text-rose-500 font-black block uppercase text-[7.5px] leading-none mb-1">Response Body / Diagnostics</span>
+                                <pre className="bg-rose-500/5 text-rose-600 dark:text-rose-400 border border-rose-500/15 p-2 rounded max-h-24 overflow-y-auto break-words whitespace-pre-wrap leading-tight font-semibold">{log.error}</pre>
+                              </div>
+                            )}
+
+                            {log.suggestedAction && (
+                              <div className="mt-1.5 bg-indigo-500/5 border border-indigo-500/20 p-2.5 rounded-lg text-indigo-700 dark:text-indigo-300 font-sans leading-relaxed text-[10px]">
+                                <span className="font-black text-[7.5px] uppercase tracking-wider block text-indigo-500 mb-0.5 font-mono">D.A.I.S.Y. Recommended Action:</span>
+                                {log.suggestedAction}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </header>
 
         {/* Core Screen Layout Grid: Stretched columns matching page width */}
@@ -1858,6 +2836,7 @@ export default function App() {
                 setCurrentLat(lat);
                 setCurrentLon(lon);
               }}
+              customMapKey={customMapKey}
             />
           </div>          {/* Spatial Interactive Disclaimer Panel */}
           <div className="w-full p-5 bg-rose-50 dark:bg-rose-950/10 border border-rose-200 dark:border-red-500/20 rounded-3xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
@@ -2005,6 +2984,26 @@ export default function App() {
                         </span>
                       </div>
                     </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                      <TrendingUp className="w-7 h-7 text-amber-500 dark:text-amber-400 shrink-0" />
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Forecast H/L</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                          {telemetry.highTemp && telemetry.lowTemp ? `${telemetry.highTemp} / ${telemetry.lowTemp}` : 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                      <Cloud className="w-7 h-7 text-blue-500 dark:text-blue-400 shrink-0" />
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Precip Prob</span>
+                        <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                          {telemetry.probPrecip || '0%'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
                   {pressureHistory && pressureHistory.length > 0 && (
@@ -2028,7 +3027,7 @@ export default function App() {
                       </div>
 
                       <div className="h-20 w-full mt-1">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <SafeResponsiveContainer minWidth={100} minHeight={80} loadingLabel="CALIBRATING BARO VIEWPORT...">
                           <AreaChart
                             data={pressureHistory}
                             margin={{ top: 2, right: 5, left: -32, bottom: 0 }}
@@ -2064,7 +3063,7 @@ export default function App() {
                               activeDot={{ r: 3, strokeWidth: 0, fill: '#06b6d4' }}
                             />
                           </AreaChart>
-                        </ResponsiveContainer>
+                        </SafeResponsiveContainer>
                       </div>
                     </div>
                   )}
@@ -2270,7 +3269,6 @@ export default function App() {
                       alert={alert}
                       hasAssets={assets.length > 0}
                       onViewTrajectory={handleFocusTrajectory}
-                      onResolve={handleResolveAlert}
                     />
                   ))}
                 </div>

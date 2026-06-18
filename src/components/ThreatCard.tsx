@@ -7,10 +7,9 @@ interface ThreatCardProps {
   alert: NWSAlert;
   hasAssets: boolean;
   onViewTrajectory?: (alert: NWSAlert) => void;
-  onResolve?: (alert: NWSAlert) => void;
 }
 
-export default function ThreatCard({ alert, hasAssets, onViewTrajectory, onResolve }: ThreatCardProps) {
+export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: ThreatCardProps) {
   const { event, areaDesc, expires, minDist, isDirectHit, headedTowards, etaMinutes, snippet, keywords, justUpdated } = alert;
   const isEmergency = keywords.emergency || event.includes('EMERGENCY');
   const isTornado = event.includes('TORNADO') || keywords.rotation || keywords.observed || keywords.funnel;
@@ -299,15 +298,6 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory, onResol
             className="mt-4 w-full bg-slate-50 dark:bg-slate-950 border border-cyan-300 dark:border-neon-aqua/50 hover:border-cyan-500 dark:hover:border-neon-aqua hover:bg-cyan-50 dark:hover:bg-neon-aqua/10 text-cyan-600 dark:text-neon-aqua font-bold py-2 rounded-xl text-xs uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
           >
             <Eye className="w-3.5 h-3.5" /> Analyze Storm Trajectory
-          </button>
-        )}
-
-        {onResolve && (
-          <button
-            onClick={() => onResolve(alert)}
-            className="mt-2 w-full bg-emerald-500/15 dark:bg-emerald-500/20 hover:bg-emerald-500 dark:hover:bg-emerald-500 hover:text-slate-950 dark:hover:text-slate-950 text-emerald-600 dark:text-emerald-400 font-extrabold py-2 rounded-xl text-xs uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 border border-emerald-500/30 dark:border-emerald-500/50 cursor-pointer"
-          >
-            <ShieldCheck className="w-4 h-4" /> Resolve & Archive Threat
           </button>
         )}
       </div>

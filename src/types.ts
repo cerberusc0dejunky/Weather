@@ -35,6 +35,15 @@ export interface NWSAlert {
   keywords: AlertKeywords;
   justUpdated: boolean;
   threatLevel: 'Low' | 'Moderate' | 'High' | 'Extreme';
+  // Advanced Internal Prediction properties
+  predictedTornadoConfidence?: number; // 0 to 100% confidence
+  strongSupercellUpdraft?: boolean; // Hail size > 2.0 inches
+  tornadoDamageThreatOnGround?: boolean; // Considerable or Catastrophic damage threats
+  polygonCentroidShiftVector?: { dir: string; speed: number; bearing: number } | null;
+  convectiveIntensificationDetected?: boolean; // CAPE or SRH instability intersection
+  velocityCoupletPersistentShear?: boolean; // Radar shear signature
+  hookEchoEvolutionDetected?: boolean; // Reflectivity hook-echo shape
+  tornadoDebrisSignatureTDS?: boolean; // Dual-pol TDS signature
 }
 
 export interface TelemetryConditions {
@@ -48,6 +57,9 @@ export interface TelemetryConditions {
   pressure?: string; // in inHg
   textDescription?: string;
   timestamp?: string;
+  highTemp?: string;
+  lowTemp?: string;
+  probPrecip?: string;
 }
 
 export interface SystemSettings {
@@ -55,6 +67,7 @@ export interface SystemSettings {
   vibrate: boolean;
   flash: boolean;
   monitorRadius: number;
+  telemetryDebug?: boolean;
 }
 
 export interface MesoscaleDiscussion {
@@ -84,4 +97,18 @@ export interface RotationPin {
   threatLevel?: 'Normal' | 'Severe' | 'Extreme';
   isObserved?: boolean;
 }
+
+export interface NetworkRequestLog {
+  id: string;
+  timestamp: string;
+  service: 'Windy' | 'NWS';
+  url: string;
+  method: string;
+  status?: number;
+  statusText?: string;
+  headers?: Record<string, string>;
+  error?: string;
+  suggestedAction?: string;
+}
+
 

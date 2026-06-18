@@ -29,7 +29,7 @@ createRoot(document.getElementById('root')!).render(
 
 // Register PWA service worker for home screen install capability
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
+  const registerSW = () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
         console.log('DAISY ServiceWorker successfully registered on scope:', registration.scope);
@@ -37,5 +37,11 @@ if ('serviceWorker' in navigator) {
       .catch((error) => {
         console.warn('DAISY ServiceWorker registration failed:', error);
       });
-  });
+  };
+
+  if (document.readyState === 'complete') {
+    registerSW();
+  } else {
+    window.addEventListener('load', registerSW);
+  }
 }
