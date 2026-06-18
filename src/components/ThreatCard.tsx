@@ -31,11 +31,11 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
       actionBg = 'bg-amber-50 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-500 text-amber-700 dark:text-amber-400';
       actionSubtext = 'Conditions favorable for severe systems';
     } else if (isTornado) {
-      actionText = 'TAKE COVER NOW';
+      actionText = 'ROTATION DETECTED TAKE COVER NOW';
       actionBg = 'bg-red-50 dark:bg-red-950 border-2 border-red-500 text-red-700 dark:text-red-100 animate-pulse';
       actionSubtext = 'Go to basement or interior safety room';
     } else if (isSevereThunderstorm) {
-      actionText = 'PREPARE FOR IMPACT';
+      actionText = 'A Severe Thunderstorm has been detected in your area';
       actionBg = 'bg-orange-50 dark:bg-orange-955 border-2 border-orange-500 text-orange-700 dark:text-orange-200';
       actionSubtext = 'Severe wind or hail threat expected';
     } else {
