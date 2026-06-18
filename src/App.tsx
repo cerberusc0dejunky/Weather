@@ -59,6 +59,7 @@ import {
   Cloud,
   Terminal,
   Key,
+  Smile,
 } from 'lucide-react';
 
 const TRACKED_ALERTS_FILTER = [
@@ -386,6 +387,7 @@ export default function App() {
     flash: true,
     monitorRadius: 25,
     telemetryDebug: false,
+    userMaskActive: true,
   });
 
   // Custom user-managed API keys
@@ -2550,6 +2552,21 @@ export default function App() {
                 </span>
               </label>
 
+              <label className="flex items-center gap-2 text-[10px] font-black uppercase cursor-pointer tracking-wider select-none text-slate-700 dark:text-slate-300" title="Softens weather warning titles and alerts to keep atmosphere relaxed and threat notifications stress-free.">
+                <input
+                  type="checkbox"
+                  id="settings-user-mask"
+                  name="userMaskToggle"
+                  checked={settings.userMaskActive ?? true}
+                  onChange={(e) => setSettings((s) => ({ ...s, userMaskActive: e.target.checked }))}
+                  className="w-4 h-4 accent-pink-500 dark:accent-pink-400 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
+                />
+                <span className="flex items-center gap-1">
+                  <Smile className="w-3.5 h-3.5 text-pink-500" />
+                  Calm Comfort Mask
+                </span>
+              </label>
+
               <button
                 type="button"
                 id="toggle-keys-panel-btn"
@@ -2837,6 +2854,7 @@ export default function App() {
                 setCurrentLon(lon);
               }}
               customMapKey={customMapKey}
+              userMaskActive={settings.userMaskActive}
             />
           </div>          {/* Spatial Interactive Disclaimer Panel */}
           <div className="w-full p-5 bg-rose-50 dark:bg-rose-950/10 border border-rose-200 dark:border-red-500/20 rounded-3xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
@@ -3269,6 +3287,7 @@ export default function App() {
                       alert={alert}
                       hasAssets={assets.length > 0}
                       onViewTrajectory={handleFocusTrajectory}
+                      userMaskActive={settings.userMaskActive}
                     />
                   ))}
                 </div>

@@ -121,6 +121,7 @@ interface RadarMapProps {
   onMapModeChange: (mode: 'satellite' | 'radar' | 'wind') => void;
   onSetCoordinates?: (lat: number, lon: number) => void;
   customMapKey?: string;
+  userMaskActive?: boolean;
 }
 
 declare global {
@@ -145,6 +146,7 @@ export default function RadarMap({
   onMapModeChange,
   onSetCoordinates,
   customMapKey,
+  userMaskActive = true,
 }: RadarMapProps) {
   const [apiLoaded, setApiLoaded] = useState<boolean>(false);
   const [initError, setInitError] = useState<boolean>(false);
@@ -824,7 +826,7 @@ export default function RadarMap({
         }
       });
 
-      // 4.6. Render clickable visual pins indicating ROTATION OR DIRECT TORNADO VORTEX DETECTED from props
+      // 4.6. Render clickable visual pins indicating ROTATION OR DIRECT TORNADO VORTEX DETECTED
       rotationPins.forEach((pin) => {
         let markerHtml = '';
         let popupTitle = '';
@@ -838,57 +840,59 @@ export default function RadarMap({
           // ACTIVE GROUND VORTEX / TDS DETECTED
           markerHtml = `
             <div class="relative flex items-center justify-center w-10 h-10">
-              <div class="absolute inset-0 bg-red-600/30 rounded-full animate-ping" style="animation-duration: 1s;"></div>
-              <div class="rounded-full w-9 h-9 flex items-center justify-center bg-rose-950 border-2 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.95)]">
-                <svg class="w-5.5 h-5.5 text-red-500 animate-spin" style="animation-duration: 1.2s;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-                  <path d="M3 4h18M6 8h12M8 12h8M10 16h4M11 20h2" stroke-width="2" />
+              <div class="absolute inset-0 bg-red-650/20 rounded-full animate-ping" style="animation-duration: 1s;"></div>
+              <div class="rounded-full w-9 h-9 flex items-center justify-center bg-slate-900 border-2 border-slate-700 shadow-[0_0_15px_rgba(30,41,59,0.5)]">
+                <svg class="w-5.5 h-5.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/>
                 </svg>
               </div>
             </div>
           `;
-          popupTitle = '🌪️ ACTIVE GROUND TORNADO';
-          popupSubTitle = 'TORNADIC DEBRIS SIGNATURE (TDS)';
-          popupBadgeColor = 'bg-rose-700 text-white animate-pulse';
-          popupDesc = 'CRITICAL TORNADO CONTACT. Doppler radar dual-polarization data confirms debris detection or emergency spotters verify a destructive tornado on the ground at this location. Take immediate, absolute life safety action.';
-          pinSize = [40, 40];
-          pinAnchor = [20, 20];
+          popupTitle = userMaskActive ? 'Safety Advisory' : '🌪️ ACTIVE GROUND TORNADO';
+          popupSubTitle = userMaskActive ? 'Precautionary Area' : 'TORNADIC DEBRIS SIGNATURE (TDS)';
+          popupBadgeColor = userMaskActive ? 'bg-slate-100 text-slate-800' : 'bg-rose-700 text-white animate-pulse';
+          popupDesc = userMaskActive 
+            ? 'Our companion guardian has registered dynamic wind circulation trends. For your absolute comfort and safety, we simply suggest relaxing in a secure interior space out of caution.'
+            : 'CRITICAL TORNADO CONTACT. Doppler radar dual-polarization data confirms debris detection or emergency spotters verify a destructive tornado on the ground at this location. Take immediate, absolute life safety action.';
+          pinSize = [36, 36];
+          pinAnchor = [18, 18];
         } else if (pin.pinType === 'radar_indicated') {
           // RADAR-INDICATED TORNADO WARNING
           markerHtml = `
             <div class="relative flex items-center justify-center w-8.5 h-8.5">
-              <div class="absolute inset-0 bg-orange-500/20 rounded-full animate-ping" style="animation-duration: 1.8s;"></div>
-              <div class="rounded-full w-8 h-8 flex items-center justify-center bg-slate-950 border-2 border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.8)]">
-                <svg class="w-4.5 h-4.5 text-orange-400 animate-spin" style="animation-duration: 2.2s;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 2a10 10 0 0 0-10 10" />
-                  <path d="M12 2v10l-7 7" />
-                  <path d="M12 12h10a10 10 0 0 0-10-10" />
-                  <path d="M12 12l7 7" />
+              <div class="absolute inset-0 bg-slate-500/10 rounded-full" style="animation-duration: 1.8s;"></div>
+              <div class="rounded-full w-8 h-8 flex items-center justify-center bg-slate-900 border-2 border-slate-700">
+                <svg class="w-4.5 h-4.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z"/>
                 </svg>
               </div>
             </div>
           `;
-          popupTitle = '⚠️ RADAR-INDICATED TORNADO';
-          popupSubTitle = 'TORNADO WARNING ACTIVE';
-          popupBadgeColor = 'bg-orange-600 text-white';
-          popupDesc = 'DOPPLER VELOCITY COUPLING. Strong gate-to-gate velocity shear indicative of low-level tornadogenesis or a high-probability vortex formation aloft.';
-          pinSize = [34, 34];
-          pinAnchor = [17, 17];
+          popupTitle = userMaskActive ? 'Climate Advisory' : '⚠️ RADAR-INDICATED TORNADO';
+          popupSubTitle = userMaskActive ? 'Active Monitoring' : 'TORNADO WARNING ACTIVE';
+          popupBadgeColor = userMaskActive ? 'bg-slate-100 text-slate-700' : 'bg-orange-600 text-white';
+          popupDesc = userMaskActive
+            ? 'Enhanced air movement has been noted by background tracking algorithms. Staying in a comfortable indoor room or family space is advised until showers clear.'
+            : 'DOPPLER VELOCITY COUPLING. Strong gate-to-gate velocity shear indicative of low-level tornadogenesis or a high-probability vortex formation aloft.';
+          pinSize = [32, 32];
+          pinAnchor = [16, 16];
         } else {
           // MESOCYCLONE OR PRECURSOR ROTATION
           markerHtml = `
-            <div class="rounded-full w-7.5 h-7.5 flex items-center justify-center bg-slate-950 border border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.55)]">
-              <svg class="w-4 h-4 text-amber-500 animate-spin" style="animation-duration: 3.5s;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+            <div class="rounded-full w-7.5 h-7.5 flex items-center justify-center bg-slate-900 border border-slate-700">
+              <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
               </svg>
             </div>
           `;
-          popupTitle = '🌀 MESOCYCLONE UPDRAFT';
-          popupSubTitle = 'VELOCITY SHEAR CLASSIFIED';
-          popupBadgeColor = 'bg-amber-500 text-slate-950 font-extrabold';
-          popupDesc = 'DEEP CONVECTIVE ROTATION. Atmospheric velocity shear detected inside the supercell core. This rotating updraft is a precursor structure capable of supporting severe hazards.';
-          pinSize = [30, 30];
-          pinAnchor = [15, 15];
+          popupTitle = userMaskActive ? 'Atmospheric Note' : '🌀 MESOCYCLONE UPDRAFT';
+          popupSubTitle = userMaskActive ? 'Light Cloud Shear' : 'VELOCITY SHEAR CLASSIFIED';
+          popupBadgeColor = userMaskActive ? 'bg-slate-100 text-slate-600' : 'bg-amber-500 text-slate-950 font-extrabold';
+          popupDesc = userMaskActive
+            ? 'Local cloud currents show typical convective moisture. Calm skies are expected to return soon; no advanced response is needed.'
+            : 'DEEP CONVECTIVE ROTATION. Atmospheric velocity shear detected inside the supercell core. This rotating updraft is a precursor structure capable of supporting severe hazards.';
+          pinSize = [28, 28];
+          pinAnchor = [14, 14];
         }
 
         const rotationDivIcon = L.divIcon({
