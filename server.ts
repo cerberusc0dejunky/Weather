@@ -125,6 +125,75 @@ function getGenAI(): GoogleGenAI {
 }
 
 // REST API for severe environmental telemetry analyzer
+const generateLocalFallback = (reqBody: any) => {
+  const { temperature, dewPoint, windSpeed, windGust, cape, activeAlerts } = reqBody;
+  
+  // Calculate a high-fidelity local calculation based on input rules:
+  // 1. Low-level moisture
+  const dp = parseFloat(dewPoint || "0");
+  const tempF = parseFloat(temperature || "0");
+  let moistureMetric = `Surface dew point ${dewPoint || "N/A"}°F.`;
+  if (dp > 0) {
+    const g_kg = Math.round(0.11 * Math.exp(0.06 * (dp - 32))); // approximate mixing ratio
+    moistureMetric = `Surface dew point ${dp}°F, mixing ratio ${g_kg || 10} g/kg.`;
+  }
+
+  // 2. Instability (CAPE)
+  const capeVal = parseInt(cape || "0", 10);
+  let instabilityMetric = `MUCAPE ${capeVal} J/kg.`;
+  if (capeVal > 1500) {
+    instabilityMetric = `MUCAPE ${capeVal} J/kg, steep 700-500mb lapse rates expected > 7.5 C/km.`;
+  } else {
+    instabilityMetric = `MUCAPE ${capeVal} J/kg, lapse rates stable around 6.0 C/km.`;
+  }
+
+  // 3. Lift
+  let liftDesc = "Weak localized terrain heating and orographic wind boundaries.";
+  const activeAlertsStr = Array.isArray(activeAlerts) ? activeAlerts.join(", ").toUpperCase() : "";
+  const hasFrontKeywords = activeAlertsStr.includes("FRONT") || activeAlertsStr.includes("DRYLINE") || activeAlertsStr.includes("CONVERGENCE") || activeAlertsStr.includes("SQUALL");
+  if (hasFrontKeywords) {
+    liftDesc = "Strong mesoscale convergence active along an advancing dryline or cold front boundary.";
+  } else if (capeVal > 1000) {
+    liftDesc = "Moderate thermal boundary layer convergence and warm air advection lifting.";
+  }
+
+  // 4. Strong vertical wind shear
+  const wsVal = parseFloat(windSpeed || "0");
+  const gustVal = parseFloat(windGust || "0");
+  let shearDesc = `Surface wind speed ${wsVal} mph. Low vertical bulk shear profiles.`;
+  if (gustVal > 30 || wsVal > 15) {
+    const srh = Math.round((wsVal + gustVal) * 6);
+    const bulkShear = Math.round(wsVal * 1.5 + 20);
+    shearDesc = `0-1km SRH near ${srh} m2s2, Effective bulk wind shear estimated at ${bulkShear} knots.`;
+  }
+
+  // Calculate tornadogenesis probability
+  let prob = 5; // base probability
+  if (dp >= 65) prob += 15;
+  else if (dp >= 55) prob += 5;
+
+  if (capeVal >= 3000) prob += 30;
+  else if (capeVal >= 1500) prob += 20;
+  else if (capeVal >= 500) prob += 10;
+
+  if (wsVal > 15 || gustVal > 30) prob += 20;
+  if (hasFrontKeywords) prob += 15;
+
+  // cap it
+  const genesis_probability_pct = Math.min(98, Math.max(2, prob));
+
+  return {
+    display_message: `Telemetry analysis complete (Fallback Analyzer). Current risk thresholds calculated.`,
+    genesis_probability_pct,
+    metrics: {
+      moisture: moistureMetric,
+      instability: instabilityMetric,
+      lift: liftDesc,
+      shear: shearDesc,
+    },
+  };
+};
+
 app.post("/api/telemetry-analysis", async (req, res) => {
   const {
     temperature,
@@ -149,71 +218,7 @@ app.post("/api/telemetry-analysis", async (req, res) => {
   // Safeguard/Fallback generation if API key is missing
   if (!process.env.GEMINI_API_KEY) {
     console.warn("process.env.GEMINI_API_KEY is not configured. Invoking local rule-based severe storm model fallback.");
-    
-    // Calculate a high-fidelity local calculation based on input rules:
-    // 1. Low-level moisture
-    const dp = parseFloat(dewPoint || "0");
-    const tempF = parseFloat(temperature || "0");
-    let moistureMetric = `Surface dew point ${dewPoint || "N/A"}°F.`;
-    if (dp > 0) {
-      const g_kg = Math.round(0.11 * Math.exp(0.06 * (dp - 32))); // approximate mixing ratio
-      moistureMetric = `Surface dew point ${dp}°F, mixing ratio ${g_kg || 10} g/kg.`;
-    }
-
-    // 2. Instability (CAPE)
-    const capeVal = parseInt(cape || "0", 10);
-    let instabilityMetric = `MUCAPE ${capeVal} J/kg.`;
-    if (capeVal > 1500) {
-      instabilityMetric = `MUCAPE ${capeVal} J/kg, steep 700-500mb lapse rates expected > 7.5 C/km.`;
-    } else {
-      instabilityMetric = `MUCAPE ${capeVal} J/kg, lapse rates stable around 6.0 C/km.`;
-    }
-
-    // 3. Lift
-    let liftDesc = "Weak localized terrain heating and orographic wind boundaries.";
-    const activeAlertsStr = Array.isArray(activeAlerts) ? activeAlerts.join(", ").toUpperCase() : "";
-    const hasFrontKeywords = activeAlertsStr.includes("FRONT") || activeAlertsStr.includes("DRYLINE") || activeAlertsStr.includes("CONVERGENCE") || activeAlertsStr.includes("SQUALL");
-    if (hasFrontKeywords) {
-      liftDesc = "Strong mesoscale convergence active along an advancing dryline or cold front boundary.";
-    } else if (capeVal > 1000) {
-      liftDesc = "Moderate thermal boundary layer convergence and warm air advection lifting.";
-    }
-
-    // 4. Strong vertical wind shear
-    const wsVal = parseFloat(windSpeed || "0");
-    const gustVal = parseFloat(windGust || "0");
-    let shearDesc = `Surface wind speed ${wsVal} mph. Low vertical bulk shear profiles.`;
-    if (gustVal > 30 || wsVal > 15) {
-      const srh = Math.round((wsVal + gustVal) * 6);
-      const bulkShear = Math.round(wsVal * 1.5 + 20);
-      shearDesc = `0-1km SRH near ${srh} m2s2, Effective bulk wind shear estimated at ${bulkShear} knots.`;
-    }
-
-    // Calculate tornadogenesis probability
-    let prob = 5; // base probability
-    if (dp >= 65) prob += 15;
-    else if (dp >= 55) prob += 5;
-
-    if (capeVal >= 3000) prob += 30;
-    else if (capeVal >= 1500) prob += 20;
-    else if (capeVal >= 500) prob += 10;
-
-    if (wsVal > 15 || gustVal > 30) prob += 20;
-    if (hasFrontKeywords) prob += 15;
-
-    // cap it
-    const genesis_probability_pct = Math.min(98, Math.max(2, prob));
-
-    const fallbackPayload = {
-      display_message: `Telemetry analysis complete (Local Analyzer). Current risk thresholds calculated.`,
-      genesis_probability_pct,
-      metrics: {
-        moisture: moistureMetric,
-        instability: instabilityMetric,
-        lift: liftDesc,
-        shear: shearDesc,
-      },
-    };
+    const fallbackPayload = generateLocalFallback(req.body);
 
     apiCache.set(cacheKey, {
       data: fallbackPayload,
@@ -307,7 +312,17 @@ Do not return any extra characters, code blocks (like \`\`\`json), or markdown. 
     return res.json(payload);
   } catch (error: any) {
     console.error("Gemini Convective Telemetry Analysis Error:", error?.message || error);
-    return res.status(500).json({ error: error?.message || "Failed to parse convective ingredients" });
+    
+    // Use fallback on any 5xx or API failure
+    console.warn("Invoking local rule-based severe storm model fallback due to API error.");
+    const fallbackPayload = generateLocalFallback(req.body);
+    
+    apiCache.set(cacheKey, {
+      data: fallbackPayload,
+      expiresAt: Date.now() + 60000 // Cache for 60s
+    });
+
+    return res.json(fallbackPayload);
   }
 });
 
