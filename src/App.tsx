@@ -444,6 +444,15 @@ export default function App() {
   // Telemetry caching proxy wrapper
   const proxyFetch = async (url: string, options: any = {}) => {
     try {
+      let parsedBody = null;
+      if (options.body) {
+        try {
+          parsedBody = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+        } catch (e) {
+          parsedBody = options.body; // fallback if not json string
+        }
+      }
+
       const res = await fetch('/api/proxy', {
         method: 'POST',
         headers: {
@@ -453,7 +462,7 @@ export default function App() {
           url,
           method: options.method || 'GET',
           headers: options.headers || {},
-          body: options.body ? JSON.parse(options.body) : null,
+          body: parsedBody,
           cacheTtl: 60000 // 1 min cache
         })
       });
@@ -471,11 +480,11 @@ export default function App() {
         statusText: json.status >= 200 && json.status < 300 ? 'OK' : 'Error',
         json: async () => json.data,
         text: async () => typeof json.data === 'string' ? json.data : JSON.stringify(json.data),
-        headers: new Headers(json.headers),
+        headers: new Headers(json.headers || {}),
         clone: function() { return this; }
       } as any;
     } catch (e) {
-      console.error('[Proxy Fetch Error]', e);
+      console.error('[Proxy Fetch Error for ' + url + ']', e);
       throw e;
     }
   };
