@@ -18,13 +18,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
 
-      # Force re-linking of native binaries for Tailwind Oxide in the runner environment
-      - name: Fix Tailwind Oxide Native Bindings
-        run: npm rebuild @tailwindcss/oxide
+      - name: Install Platform-Specific Tailwind Engine
+        run: npm install @tailwindcss/oxide-linux-x64-gnu --save-optional
 
       - name: Build Project
         run: npm run build
