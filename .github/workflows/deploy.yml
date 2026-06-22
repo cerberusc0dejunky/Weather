@@ -9,9 +9,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
-    # If using the GitHub Environment, uncomment the line below:
-    # environment: github-pages
 
     steps:
       - name: Checkout Repository
@@ -24,6 +21,10 @@ jobs:
 
       - name: Install Dependencies
         run: npm ci
+
+      # Force re-linking of native binaries for Tailwind Oxide in the runner environment
+      - name: Fix Tailwind Oxide Native Bindings
+        run: npm rebuild @tailwindcss/oxide
 
       - name: Build Project
         run: npm run build
