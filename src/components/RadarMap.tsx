@@ -165,6 +165,8 @@ export default function RadarMap({
   const windyMapRef = useRef<any>(null);
   const windyStoreRef = useRef<any>(null);
   const tileLayerRef = useRef<any>(null);
+  const radarLayerRef = useRef<any>(null);
+  const labelsLayerRef = useRef<any>(null);
   const polygonLayersRef = useRef<any[]>([]);
   const userMarkerRef = useRef<any>(null);
   const assetMarkersRef = useRef<any[]>([]);
@@ -391,6 +393,20 @@ export default function RadarMap({
       tileLayerRef.current = null;
     }
 
+    if (radarLayerRef.current) {
+      try {
+        map.removeLayer(radarLayerRef.current);
+      } catch (e) {}
+      radarLayerRef.current = null;
+    }
+
+    if (labelsLayerRef.current) {
+      try {
+        map.removeLayer(labelsLayerRef.current);
+      } catch (e) {}
+      labelsLayerRef.current = null;
+    }
+
     // Clean storm polygons and trajectory polylines
     polygonLayersRef.current.forEach((layer) => {
       try {
@@ -486,25 +502,68 @@ export default function RadarMap({
         lastSetCoordinatesRef.current = { lat: userLat, lon: userLon };
       }
 
-      // 1.5. Check overlay map mode and add solid, premium tile layers as fallback/primary if Windy CDN or server encounters strict CSP boundaries
-      if (mapMode === 'satellite') {
-        tileLayerRef.current = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Tiles &copy; Esri &mdash; Source: USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, and the GIS User Community',
-          maxZoom: 18,
-        }).addTo(map);
-      } else if (mapMode === 'radar') {
-        tileLayerRef.current = L.tileLayer('https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png', {
-          attribution: 'Live Weather Radar &copy; IEM NEXRAD',
-          maxZoom: 18,
-          opacity: reflectivityType === 'high-res' ? 0.9 : 0.65,
-          className: reflectivityType === 'high-res' ? 'radar-high-res-enhanced' : 'radar-standard-rendering',
-        }).addTo(map);
-      } else if (mapMode === 'wind') {
-        tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-          subdomains: 'abcd',
-          maxZoom: 20,
-        }).addTo(map);
+      // 1.5. Check overlay map mode and add solid, layered, premium tile layers as fallback ONLY if Windy is blocked (initError === true)
+      if (initError) {
+        if (mapMode === 'satellite') {
+          // Satellite imagery base
+          tileLayerRef.current = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, and the GIS User Community',
+            maxZoom: 18,
+          }).addTo(map);
+
+          // Standard labels overlaid on top of satellite imagery for clear navigation / reference
+          labelsLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 20,
+            zIndex: 1000,
+          }).addTo(map);
+        } else if (mapMode === 'radar') {
+          // High-contrast clean dark-mode base map (no labels) so weather patterns pop nicely
+          tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20,
+          }).addTo(map);
+
+          // Real-time radar reflectivity layered in the middle
+          radarLayerRef.current = L.tileLayer('https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png', {
+            attribution: 'Live Weather Radar &copy; IEM NEXRAD',
+            maxZoom: 18,
+            opacity: reflectivityType === 'high-res' ? 0.95 : 0.70,
+            className: reflectivityType === 'high-res' ? 'radar-high-res-enhanced' : 'radar-standard-rendering',
+          }).addTo(map);
+
+          // High-contrast labels overlaid on top of radar coverage so they don't get buried
+          labelsLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 20,
+            zIndex: 1000,
+          }).addTo(map);
+        } else if (mapMode === 'wind') {
+          // High-contrast clean dark-mode base map (no labels)
+          tileLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20,
+          }).addTo(map);
+
+          // Overlay light opacity radar so users see rainfall in addition to wind circulation/rotation vectors
+          radarLayerRef.current = L.tileLayer('https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png', {
+            attribution: 'Live Weather Radar &copy; IEM NEXRAD',
+            maxZoom: 18,
+            opacity: 0.25,
+          }).addTo(map);
+
+          // High-contrast labels overlaid on top
+          labelsLayerRef.current = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 20,
+            zIndex: 1000,
+          }).addTo(map);
+        }
       }
 
       // 2. Plot precise user GPS marker with a custom pulsing element

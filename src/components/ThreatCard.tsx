@@ -56,7 +56,7 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory, userMas
       actionBg = 'bg-amber-50 dark:bg-amber-955/80 border border-amber-300 dark:border-amber-500 text-amber-700 dark:text-amber-400';
       actionSubtext = cardMaskActive ? 'Skies are clear, but conditions indicate shower potential' : 'Conditions favorable for severe systems';
     } else if (isTornado) {
-      actionText = cardMaskActive ? 'SEEK COZY COVER' : 'TAKE COVER NOW';
+      actionText = cardMaskActive ? 'SEEK COZY COVER' : 'TAKE SHELTER NOW';
       actionBg = 'bg-slate-100 dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200';
       actionSubtext = cardMaskActive ? 'Let\'s rest in a safe interior room out of comfort' : 'Go to basement or interior safety room';
     } else if (isSevereThunderstorm) {

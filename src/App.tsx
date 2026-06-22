@@ -60,6 +60,8 @@ import {
   Terminal,
   Key,
   Smile,
+  Zap,
+  Flame,
 } from 'lucide-react';
 
 const TRACKED_ALERTS_FILTER = [
@@ -419,6 +421,11 @@ export default function App() {
   const [pwaPrompt, setPwaPrompt] = useState<any>(null);
   const [showInstallGuide, setShowInstallGuide] = useState<boolean>(false);
 
+  // Experimental Tornadogenesis Probability Analysis States
+  const [tornadogenesisData, setTornadogenesisData] = useState<any | null>(null);
+  const [isAnalyzingTelemetry, setIsAnalyzingTelemetry] = useState<boolean>(false);
+  const [showTornadogenesisModal, setShowTornadogenesisModal] = useState<boolean>(false);
+
   // Potential rotation pins state derived from active alerts
   const [rotationPins, setRotationPins] = useState<RotationPin[]>([]);
 
@@ -432,6 +439,45 @@ export default function App() {
 
   const triggerToast = (message: string, type: 'error' | 'success' | 'info' = 'info') => {
     setNotificationToast({ message, type });
+  };
+
+  // Telemetry caching proxy wrapper
+  const proxyFetch = async (url: string, options: any = {}) => {
+    try {
+      const res = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url,
+          method: options.method || 'GET',
+          headers: options.headers || {},
+          body: options.body ? JSON.parse(options.body) : null,
+          cacheTtl: 60000 // 1 min cache
+        })
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Proxy error: ${res.status} ${errText}`);
+      }
+      const json = await res.json();
+      
+      // The proxy returns { status: number, headers: any, data: any }
+      // We simulate a fetch response object for seamless integration
+      return {
+        ok: json.status >= 200 && json.status < 300,
+        status: json.status,
+        statusText: json.status >= 200 && json.status < 300 ? 'OK' : 'Error',
+        json: async () => json.data,
+        text: async () => typeof json.data === 'string' ? json.data : JSON.stringify(json.data),
+        headers: new Headers(json.headers),
+        clone: function() { return this; }
+      } as any;
+    } catch (e) {
+      console.error('[Proxy Fetch Error]', e);
+      throw e;
+    }
   };
 
   useEffect(() => {
@@ -615,7 +661,7 @@ export default function App() {
     };
 
     try {
-      const res = await fetch(nwsUrl, { headers });
+      const res = await proxyFetch(nwsUrl, { headers });
       
       logNetworkRequest({
         service: 'NWS',
@@ -1136,7 +1182,7 @@ export default function App() {
   // Core SPC Mesoscale Discussions Acquisition Engine
   const fetchMesoscaleDiscussions = async () => {
     try {
-      const res = await fetch('https://api.weather.gov/products/types/MCD', {
+      const res = await proxyFetch('https://api.weather.gov/products/types/MCD', {
         headers: {
           'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
         }
@@ -1156,7 +1202,7 @@ export default function App() {
         const fetched = await Promise.all(
           topProducts.map(async (prod: any) => {
             try {
-              const prodRes = await fetch(`https://api.weather.gov/products/${prod.id}`, {
+              const prodRes = await proxyFetch(`https://api.weather.gov/products/${prod.id}`, {
                 headers: {
                   'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
                 }
@@ -1218,7 +1264,7 @@ export default function App() {
         });
       }
 
-      let res = await fetch(url, {
+      let res = await proxyFetch(url, {
         method: 'POST',
         headers: reqHeaders,
         body: JSON.stringify(body)
@@ -1250,7 +1296,7 @@ export default function App() {
 
         model = 'gfs';
         body.model = 'gfs';
-        res = await fetch(`https://api.windy.com/api/point-forecast/v2?key=${windyPointKey}`, {
+        res = await proxyFetch(`https://api.windy.com/api/point-forecast/v2?key=${windyPointKey}`, {
           method: 'POST',
           headers: reqHeaders,
           body: JSON.stringify(body)
@@ -1491,7 +1537,7 @@ export default function App() {
 
       if (!forecastUrl) {
         const pointsUrl = `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`;
-        const ptRes = await fetch(pointsUrl, { headers });
+        const ptRes = await proxyFetch(pointsUrl, { headers });
 
         logNetworkRequest({
           service: 'NWS',
@@ -1513,7 +1559,7 @@ export default function App() {
 
       if (!forecastUrl) return null;
 
-      const fcRes = await fetch(forecastUrl, { headers });
+      const fcRes = await proxyFetch(forecastUrl, { headers });
       logNetworkRequest({
         service: 'NWS',
         url: forecastUrl,
@@ -1587,7 +1633,7 @@ export default function App() {
         const headers = {
           'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
         };
-        const ptRes = await fetch(pointsUrl, { headers });
+        const ptRes = await proxyFetch(pointsUrl, { headers });
         
         logNetworkRequest({
           service: 'NWS',
@@ -1605,7 +1651,7 @@ export default function App() {
         if (!stationsUrl) return;
 
         // Step B: Grab nearest weather station identity (if not cached)
-        const stationRes = await fetch(stationsUrl, { headers });
+        const stationRes = await proxyFetch(stationsUrl, { headers });
         
         logNetworkRequest({
           service: 'NWS',
@@ -1638,7 +1684,7 @@ export default function App() {
       const obsHeaders = {
         'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
       };
-      const obsRes = await fetch(obsUrl, { headers: obsHeaders });
+      const obsRes = await proxyFetch(obsUrl, { headers: obsHeaders });
       
       logNetworkRequest({
         service: 'NWS',
@@ -1680,7 +1726,7 @@ export default function App() {
       // Fetch recent observations list for exact barometric historical trends (no seeding, real data only)
       try {
         const histUrl = `https://api.weather.gov/stations/${stationId}/observations?limit=12`;
-        const histRes = await fetch(histUrl, { headers: obsHeaders });
+        const histRes = await proxyFetch(histUrl, { headers: obsHeaders });
         logNetworkRequest({
           service: 'NWS',
           url: histUrl,
@@ -1762,6 +1808,64 @@ export default function App() {
     }
   };
 
+  // Convective Telemetry Analysis Orchestration
+  const fetchTelemetryAnalysis = async (customTelemetry?: any, customCape?: number) => {
+    const targetTelemetry = customTelemetry || telemetry;
+    const targetCape = customCape !== undefined ? customCape : (windyPointTelemetry?.cape !== undefined ? windyPointTelemetry.cape : (capeHistory.length > 0 ? capeHistory[capeHistory.length - 1].cape : 0));
+
+    if (!targetTelemetry) {
+      console.warn('No active telemetry data synchronized yet.');
+      return;
+    }
+
+    try {
+      setIsAnalyzingTelemetry(true);
+      const res = await fetch('/api/telemetry-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          temperature: targetTelemetry.temperature,
+          dewPoint: targetTelemetry.dewPoint,
+          windSpeed: targetTelemetry.windSpeed,
+          windGust: targetTelemetry.windGust,
+          pressure: targetTelemetry.pressure,
+          cape: targetCape,
+          recentDiscussions: discussions.map(d => ({ number: d.number, headline: d.areasAffected })),
+          activeAlerts: alerts.map(a => a.event)
+        })
+      });
+
+      logNetworkRequest({
+        service: 'Analyzer',
+        url: '/api/telemetry-analysis',
+        method: 'POST',
+        status: res.status,
+        statusText: res.ok ? 'OK' : 'Error',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (res.ok) {
+        const payload = await res.json();
+        setTornadogenesisData(payload);
+      } else {
+        console.warn('Server analyzer endpoint responded with error status:', res.status);
+      }
+    } catch (e) {
+      console.warn('Failed to parse microclimate convective ingredients:', e);
+    } finally {
+      setIsAnalyzingTelemetry(false);
+    }
+  };
+
+  // Automate background thermodynamic analysis on telemetry syncs
+  useEffect(() => {
+    if (telemetry) {
+      fetchTelemetryAnalysis();
+    }
+  }, [telemetry?.timestamp, telemetry?.stationId]);
+
   // Add search/pin targeted locations
   const handleAddNewPin = async () => {
     siren.init(); // prime Audio Context on click event
@@ -1771,7 +1875,7 @@ export default function App() {
     setSearching(true);
     try {
       const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanedQuery)}&countrycodes=us&addressdetails=1&limit=1`;
-      const res = await fetch(url, {
+      const res = await proxyFetch(url, {
         headers: { 'User-Agent': 'DAISY-Emergency-System/1.0 (contact: cerberus@c0dejunky.com)' },
       });
 
@@ -1851,7 +1955,7 @@ export default function App() {
           // Get location name via reverse Nominatim geocoder
           try {
             const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`;
-            const response = await fetch(url, {
+            const response = await proxyFetch(url, {
               headers: { 'User-Agent': 'DAISY-Emergency-System/1.0 (contact: cerberus@c0dejunky.com)' },
             });
             if (response.ok) {
@@ -2219,6 +2323,191 @@ export default function App() {
                 Close Guide
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Experimental Tornadogenesis Model Modal */}
+      {showTornadogenesisModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[500] flex items-center justify-center p-6 animate-fade-in" id="tornadogenesis-modal">
+          <div className="bg-white dark:bg-slate-900 border border-indigo-500/20 dark:border-indigo-500/30 rounded-3xl p-6 sm:p-8 max-w-2xl w-full text-slate-800 dark:text-white shadow-2xl transition-all max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h2 className="text-lg sm:text-xl font-black font-sans tracking-tight uppercase text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-indigo-600 dark:from-orange-400 dark:to-indigo-400 flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-orange-500 animate-pulse" />
+                  Convective Tornadogenesis Model (EXPERIMENTAL)
+                </h2>
+                <p className="text-[9px] sm:text-[10px] font-mono uppercase tracking-widest text-slate-400 dark:text-slate-500 mt-1 font-extrabold pb-1 border-b border-slate-100 dark:border-slate-800">
+                  Thermodynamic AI Solver & Atmospheric Telemetry Core
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTornadogenesisModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-black text-sm uppercase px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Main Content Body */}
+            {isAnalyzingTelemetry ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-3">
+                <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                <p className="text-[10px] sm:text-xs font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold animate-pulse">
+                  Querying dynamic atmospheric solver columns...
+                </p>
+              </div>
+            ) : tornadogenesisData ? (
+              <div className="space-y-6">
+                {/* Visual Gauge Summary Card */}
+                <div className="bg-slate-50 dark:bg-slate-950/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-850 flex flex-col sm:flex-row items-center gap-6">
+                  {/* Circular Ring Gauge */}
+                  <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90">
+                      <circle
+                        cx="56"
+                        cy="56"
+                        r="48"
+                        className="stroke-slate-200 dark:stroke-slate-800"
+                        strokeWidth="8"
+                        fill="transparent"
+                      />
+                      <circle
+                        cx="56"
+                        cy="56"
+                        r="48"
+                        className="stroke-indigo-500 dark:stroke-indigo-400 transition-all duration-1000"
+                        strokeWidth="8"
+                        fill="transparent"
+                        strokeDasharray={301.6}
+                        strokeDashoffset={301.6 - (301.6 * (tornadogenesisData.genesis_probability_pct || 0)) / 100}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <div className="absolute text-center">
+                      <span className="text-2xl font-black font-mono leading-none">
+                        {tornadogenesisData.genesis_probability_pct}%
+                      </span>
+                      <span className="text-[7.5px] font-black uppercase text-slate-400 block tracking-widest mt-0.5">
+                        TORNADO PROB
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Summary Text description */}
+                  <div className="text-left space-y-2">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-none">
+                      AI Diagnostic Assessment
+                    </h3>
+                    <p className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 leading-relaxed">
+                      {tornadogenesisData.display_message || 'Atmospheric telemetry columns analyzed successfully.'}
+                    </p>
+                    <div className="flex gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[8px] font-mono tracking-widest uppercase font-bold text-white ${
+                        tornadogenesisData.genesis_probability_pct > 60
+                          ? 'bg-rose-600'
+                          : tornadogenesisData.genesis_probability_pct > 30
+                          ? 'bg-orange-500'
+                          : 'bg-emerald-600'
+                      }`}>
+                        {tornadogenesisData.genesis_probability_pct > 60
+                          ? 'CRITICAL UNSTABLE COLUMN'
+                          : tornadogenesisData.genesis_probability_pct > 30
+                          ? 'WIND COUPLING ELEVATED'
+                          : 'MODERATE CONVECTIVE ENVIRONMENT'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* The 4 Severe Weather Ingredients (Bento Grid) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Low Level Moisture */}
+                  <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Thermometer className="w-4 h-4 text-rose-500" />
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                        1. Low-level Moisture
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed uppercase">
+                      {tornadogenesisData.metrics?.moisture || 'Checking mixing ratios...'}
+                    </p>
+                  </div>
+
+                  {/* Instability */}
+                  <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Gauge className="w-4 h-4 text-amber-500" />
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                        2. Atmospheric Instability
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed uppercase">
+                      {tornadogenesisData.metrics?.instability || 'Analyzing MUCAPE column...'}
+                    </p>
+                  </div>
+
+                  {/* Lifting Mechanisms */}
+                  <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Zap className="w-4 h-4 text-cyan-500 animate-pulse" />
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                        3. Lifting Mechanisms
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed uppercase">
+                      {tornadogenesisData.metrics?.lift || 'Assessing front/boundary convergence...'}
+                    </p>
+                  </div>
+
+                  {/* Vertical Wind Shear */}
+                  <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Wind className="w-4 h-4 text-indigo-500" />
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                        4. Vertical Wind Shear
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed uppercase">
+                      {tornadogenesisData.metrics?.shear || 'Modeling effective SRH grids...'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                  <button
+                    type="button"
+                    onClick={() => fetchTelemetryAnalysis()}
+                    className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-white font-extrabold text-[10px] tracking-wider uppercase rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Compass className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: '6s' }} /> Re-Analyze Telemetry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTornadogenesisModal(false)}
+                    className="flex-1 py-3 bg-indigo-650 hover:bg-indigo-500 text-white font-black text-[10px] tracking-wider uppercase rounded-xl transition-colors cursor-pointer"
+                  >
+                    Dismiss Diagnostic
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="py-12 text-center space-y-3">
+                <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto animate-bounce" />
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase">
+                  No telemetry metrics synchronized in this zone yet.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => fetchTelemetryAnalysis()}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] tracking-wider uppercase rounded-xl cursor-pointer"
+                >
+                  Force Poll Analysis
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3144,6 +3433,19 @@ export default function App() {
                       Severe cells may change course, split, or fail completely when encountering local stable air masses.
                     </div>
                   </div>
+
+                  <button
+                    type="button"
+                    id="open-vtp-modal-btn"
+                    onClick={() => {
+                      fetchTelemetryAnalysis();
+                      setShowTornadogenesisModal(true);
+                    }}
+                    className="w-full py-3 px-4 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 hover:border-cyan-400 dark:hover:border-neon-aqua hover:text-cyan-600 dark:hover:text-neon-aqua text-slate-800 dark:text-slate-200 font-black uppercase text-[10px] tracking-wider rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <Flame className="w-4 h-4 text-orange-500 animate-pulse" />
+                    <span>View Tornadogenesis Probability (EXPERIMENTAL)</span>
+                  </button>
                 </div>
 
                 <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-4">

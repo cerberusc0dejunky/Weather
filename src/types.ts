@@ -102,7 +102,7 @@ export interface RotationPin {
 export interface NetworkRequestLog {
   id: string;
   timestamp: string;
-  service: 'Windy' | 'NWS';
+  service: 'Windy' | 'NWS' | 'Analyzer';
   url: string;
   method: string;
   status?: number;
