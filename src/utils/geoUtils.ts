@@ -1,3 +1,11 @@
+import {
+  point,
+  polygon as turfPolygon,
+  lineString,
+  nearestPointOnLine,
+  booleanPointInPolygon,
+} from '@turf/turf';
+
 export function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3958.8; // Radius of Earth in miles
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -44,75 +52,112 @@ export const cardinalBearings: Record<string, number> = {
   NNW: 337.5,
 };
 
-function isLeft(x1: number, y1: number, x2: number, y2: number, px: number, py: number): number {
-  return (x2 - x1) * (py - y1) - (px - x1) * (y2 - y1);
-}
-
-export function isPointInPolygon(lat: number, lon: number, polygon: [number, number][]): boolean {
-  if (!polygon || polygon.length < 3) return false;
-  let wn = 0; // Winding number counter
-
-  for (let i = 0; i < polygon.length; i++) {
-    const nextIdx = (i + 1) % polygon.length;
-    const x1 = polygon[i][0]; // lon
-    const y1 = polygon[i][1]; // lat
-    const x2 = polygon[nextIdx][0]; // lon
-    const y2 = polygon[nextIdx][1]; // lat
-
-    if (y1 <= lat) {
-      if (y2 > lat) { // Upward crossing
-        if (isLeft(x1, y1, x2, y2, lon, lat) > 0) {
-          wn++;
-        }
-      }
-    } else {
-      if (y2 <= lat) { // Downward crossing
-        if (isLeft(x1, y1, x2, y2, lon, lat) < 0) {
-          wn--;
-        }
-      }
-    }
+/**
+ * Checks if a lat/lon point is inside a GeoJSON-style polygon ring ([lon, lat][] coords).
+ * Uses turf's booleanPointInPolygon for robust multi-polygon and hole support.
+ */
+export function isPointInPolygon(lat: number, lon: number, polygonRing: [number, number][]): boolean {
+  if (!polygonRing || polygonRing.length < 3) return false;
+  try {
+    // Turf polygons need a closed ring (first == last point)
+    const ring = polygonRing[0][0] === polygonRing[polygonRing.length - 1][0] &&
+                 polygonRing[0][1] === polygonRing[polygonRing.length - 1][1]
+      ? polygonRing
+      : [...polygonRing, polygonRing[0]];
+    const pt = point([lon, lat]);
+    const poly = turfPolygon([ring]);
+    return booleanPointInPolygon(pt, poly);
+  } catch {
+    return false;
   }
-  return wn !== 0;
 }
 
+/**
+ * Finds the minimum distance (in miles) from a lat/lon asset to the nearest
+ * edge of a NWS GeoJSON geometry (Polygon or MultiPolygon).
+ * Uses turf's nearestPointOnLine for true geodesic edge proximity,
+ * and booleanPointInPolygon for inside-check.
+ */
 export function getMinPolygonDistance(
   assetLat: number,
   assetLon: number,
   geometryCoordinates: any
 ): { minDist: number; closestPt: [number, number] | null; isInside: boolean } {
+  const assetPt = point([assetLon, assetLat]);
   let minDist = 9999;
   let closestPt: [number, number] | null = null;
   let isInside = false;
 
-  function traverse(arr: any) {
-    if (!Array.isArray(arr)) return;
+  // Extract all rings (handles both Polygon and MultiPolygon coordinate structures)
+  function processRings(rings: any[][]) {
+    for (const ring of rings) {
+      if (!Array.isArray(ring) || ring.length < 3) continue;
+      const coords: [number, number][] = ring.map((pt: any) => [pt[0], pt[1]] as [number, number]);
+      // Ensure ring is closed
+      const closed = coords[0][0] === coords[coords.length - 1][0] &&
+                     coords[0][1] === coords[coords.length - 1][1]
+        ? coords
+        : [...coords, coords[0]];
 
-    if (
-      arr.length >= 2 &&
-      typeof arr[0] === 'number' &&
-      typeof arr[1] === 'number'
-    ) {
-      // longitude is index 0, latitude is index 1
-      const d = getDistance(assetLat, assetLon, arr[1], arr[0]);
-      if (d < minDist) {
-        minDist = d;
-        closestPt = [arr[0], arr[1]];
-      }
-    } else {
-      if (Array.isArray(arr[0]) && typeof arr[0][0] === 'number') {
-        const ring: [number, number][] = arr.map((pt: any) => [pt[0], pt[1]]);
-        if (isPointInPolygon(assetLat, assetLon, ring)) {
+      // Check inside
+      try {
+        const poly = turfPolygon([closed]);
+        if (!isInside && booleanPointInPolygon(assetPt, poly)) {
           isInside = true;
         }
-      }
-      for (let i = 0; i < arr.length; i++) {
-        traverse(arr[i]);
+      } catch { /* malformed ring, skip */ }
+
+      // Measure true edge distance using nearestPointOnLine
+      try {
+        const line = lineString(closed);
+        const nearest = nearestPointOnLine(line, assetPt, { units: 'miles' });
+        const d = nearest.properties.dist ?? 9999;
+        if (d < minDist) {
+          minDist = d;
+          const [lon, lat] = nearest.geometry.coordinates;
+          closestPt = [lon, lat];
+        }
+      } catch { /* malformed coords, fall back to vertex scan */
+        for (const coord of coords) {
+          const d = getDistance(assetLat, assetLon, coord[1], coord[0]);
+          if (d < minDist) {
+            minDist = d;
+            closestPt = [coord[0], coord[1]];
+          }
+        }
       }
     }
   }
 
-  traverse(geometryCoordinates);
+  if (!Array.isArray(geometryCoordinates) || geometryCoordinates.length === 0) {
+    return { minDist, closestPt, isInside };
+  }
+
+  // Detect Polygon vs MultiPolygon by depth
+  const firstEl = geometryCoordinates[0];
+  if (Array.isArray(firstEl) && Array.isArray(firstEl[0]) && typeof firstEl[0][0] === 'number') {
+    // Polygon: [ [ [lon,lat], ... ] ]
+    processRings(geometryCoordinates);
+  } else if (Array.isArray(firstEl) && Array.isArray(firstEl[0]) && Array.isArray(firstEl[0][0])) {
+    // MultiPolygon: [ [ [ [lon,lat], ... ] ], ... ]
+    for (const polygonRings of geometryCoordinates) {
+      processRings(polygonRings);
+    }
+  } else {
+    // Unknown depth — try generic vertex scan as fallback
+    function traverse(arr: any) {
+      if (!Array.isArray(arr)) return;
+      if (arr.length >= 2 && typeof arr[0] === 'number' && typeof arr[1] === 'number') {
+        const d = getDistance(assetLat, assetLon, arr[1], arr[0]);
+        if (d < minDist) { minDist = d; closestPt = [arr[0], arr[1]]; }
+      } else {
+        for (const child of arr) traverse(child);
+      }
+    }
+    traverse(geometryCoordinates);
+  }
+
+  if (isInside) minDist = 0;
   return { minDist, closestPt, isInside };
 }
 
@@ -291,31 +336,22 @@ export function parseSPCLatLon(text: string): { lat: number; lon: number }[] {
 
 export function isPointInParsedPolygon(lat: number, lon: number, polygon: { lat: number; lon: number }[]): boolean {
   if (!polygon || polygon.length < 3) return false;
-  let wn = 0; // Winding number counter
-
-  for (let i = 0; i < polygon.length; i++) {
-    const nextIdx = (i + 1) % polygon.length;
-    const x1 = polygon[i].lon;
-    const y1 = polygon[i].lat;
-    const x2 = polygon[nextIdx].lon;
-    const y2 = polygon[nextIdx].lat;
-
-    if (y1 <= lat) {
-      if (y2 > lat) { // Upward crossing
-        if (isLeft(x1, y1, x2, y2, lon, lat) > 0) {
-          wn++;
-        }
-      }
-    } else {
-      if (y2 <= lat) { // Downward crossing
-        if (isLeft(x1, y1, x2, y2, lon, lat) < 0) {
-          wn--;
-        }
-      }
-    }
+  try {
+    // Convert { lat, lon }[] to GeoJSON [lon, lat][] for turf
+    const coords: [number, number][] = polygon.map(p => [p.lon, p.lat]);
+    // Ensure closed ring
+    const closed: [number, number][] = coords[0][0] === coords[coords.length - 1][0] &&
+                   coords[0][1] === coords[coords.length - 1][1]
+      ? coords
+      : [...coords, coords[0]];
+    const pt = point([lon, lat]);
+    const poly = turfPolygon([closed]);
+    return booleanPointInPolygon(pt, poly);
+  } catch {
+    return false;
   }
-  return wn !== 0;
 }
+
 
 export function getParsedPolygonMinDistance(
   assetLat: number,
