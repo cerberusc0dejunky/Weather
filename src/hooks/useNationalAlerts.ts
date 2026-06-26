@@ -1,5 +1,4 @@
 import { useState, useCallback, useRef } from 'react';
-import * as turf from '@turf/turf';
 import { NWSAlert } from '../types';
 import {
   getDistance,
