@@ -122,6 +122,8 @@ interface RadarMapProps {
   onSetCoordinates?: (lat: number, lon: number) => void;
   customMapKey?: string;
   userMaskActive?: boolean;
+  onSelectTrack?: (track: any) => void;
+  activeRadarTrack?: any[];
 }
 
 declare global {
@@ -147,6 +149,8 @@ export function RadarMapComponent({
   onSetCoordinates,
   customMapKey,
   userMaskActive = true,
+  onSelectTrack,
+  activeRadarTrack = [],
 }: RadarMapProps) {
   const [apiLoaded, setApiLoaded] = useState<boolean>(false);
   const [initError, setInitError] = useState<boolean>(false);
