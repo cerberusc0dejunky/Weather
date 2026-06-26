@@ -1,6 +1,6 @@
 ================================================================================
 CODEBASE BUNDLE FOR NOTEBOOKLM
-Generated: 2026-06-26T06:47:44.406Z
+Generated: 2026-06-26T06:56:12.694Z
 Project Root: C:\Users\Quant\Projects\D.A.I.S.Y
 Total Files Compiled: 31
 ================================================================================
@@ -305,7 +305,7 @@ FUNCTION CALL HIERARCHY
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: pins.push (External/Library)
     - Calls: new Date().toISOString (External/Library)
-  - Function/Scope: App (Lines 178-2796)
+  - Function/Scope: App (Lines 178-2763)
     - Calls: useToast (Imported from src/contexts/ToastContext.tsx)
     - Calls: useStormSiren (Imported from src/hooks/useStormSiren.ts)
     - Calls: useState (Library/external import (react))
@@ -440,14 +440,12 @@ FUNCTION CALL HIERARCHY
     - Calls: processedMDs.sort (External/Library)
     - Calls: setDiscussions (External/Library)
     - Calls: setIsAnalyzingTelemetry (External/Library)
-    - Calls: discussions.map (External/Library)
-    - Calls: alerts.map (External/Library)
-    - Calls: setTornadogenesisData (External/Library)
     - Calls: String (External/Library)
     - Calls: alerts.filter (External/Library)
     - Calls: a.event.toUpperCase().includes (External/Library)
     - Calls: a.event.toUpperCase (External/Library)
     - Calls: Math.min (External/Library)
+    - Calls: setTornadogenesisData (External/Library)
     - Calls: fetchTelemetryAnalysis (External/Library)
     - Calls: alerts.some (External/Library)
     - Calls: a.event.includes (External/Library)
@@ -649,6 +647,7 @@ FUNCTION CALL HIERARCHY
     - Calls: setShowMDInputForm (External/Library)
     - Calls: setNewMDText (External/Library)
     - Calls: handleAddCustomMD (Local)
+    - Calls: discussions.map (External/Library)
     - Calls: handleFocusMD (Local)
   - Function/Scope: listenOnline (Lines 360-360)
     - Calls: setConnectionOnline (External/Library)
@@ -677,7 +676,7 @@ FUNCTION CALL HIERARCHY
     - Calls: prevAlerts.filter (External/Library)
     - Calls: addAlertsToHistoryRef.current (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleAddNewPin (Lines 1217-1262)
+  - Function/Scope: handleAddNewPin (Lines 1184-1229)
     - Calls: searchQuery.trim (External/Library)
     - Calls: setSearching (External/Library)
     - Calls: encodeURIComponent (External/Library)
@@ -695,10 +694,10 @@ FUNCTION CALL HIERARCHY
     - Calls: fetchTelemetryRef.current (External/Library)
     - Calls: triggerToast (External/Library)
     - Calls: console.error (External/Library)
-  - Function/Scope: handleRemovePin (Lines 1264-1266)
+  - Function/Scope: handleRemovePin (Lines 1231-1233)
     - Calls: setAssets (External/Library)
     - Calls: prev.filter (External/Library)
-  - Function/Scope: handleAddCustomMD (Lines 1268-1277)
+  - Function/Scope: handleAddCustomMD (Lines 1235-1244)
     - Calls: inputText.trim (External/Library)
     - Calls: parseMesoscaleDiscussion (Local)
     - Calls: Date.now (External/Library)
@@ -706,7 +705,7 @@ FUNCTION CALL HIERARCHY
     - Calls: setCustomMDs (External/Library)
     - Calls: console.warn (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleArmActivation (Lines 1280-1351)
+  - Function/Scope: handleArmActivation (Lines 1247-1318)
     - Calls: setIsActivating (External/Library)
     - Calls: setLocationError (External/Library)
     - Calls: navigator.geolocation.getCurrentPosition (External/Library)
@@ -722,39 +721,39 @@ FUNCTION CALL HIERARCHY
     - Calls: setShowTermsModal (External/Library)
     - Calls: triggerToast (External/Library)
     - Calls: console.warn (External/Library)
-  - Function/Scope: handleLocationAccept (Lines 1353-1355)
+  - Function/Scope: handleLocationAccept (Lines 1320-1322)
     - Calls: handleArmActivation (Local)
-  - Function/Scope: handleLocationDecline (Lines 1357-1361)
+  - Function/Scope: handleLocationDecline (Lines 1324-1328)
     - Calls: setIsActivating (External/Library)
     - Calls: setLocationError (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleClearAlertHistory (Lines 1363-1366)
+  - Function/Scope: handleClearAlertHistory (Lines 1330-1333)
     - Calls: setAlertHistory (External/Library)
     - Calls: localStorage.removeItem (External/Library)
-  - Function/Scope: handleRemoveAlertHistoryItem (Lines 1368-1374)
+  - Function/Scope: handleRemoveAlertHistoryItem (Lines 1335-1341)
     - Calls: setAlertHistory (External/Library)
     - Calls: prev.filter (External/Library)
     - Calls: localStorage.setItem (External/Library)
     - Calls: JSON.stringify (External/Library)
-  - Function/Scope: handleTestSiren (Lines 1377-1380)
+  - Function/Scope: handleTestSiren (Lines 1344-1347)
     - Calls: playSiren (External/Library)
     - Calls: setTimeout (External/Library)
     - Calls: stopSiren (External/Library)
-  - Function/Scope: handleShareApp (Lines 1383-1399)
+  - Function/Scope: handleShareApp (Lines 1350-1366)
     - Calls: navigator.share (External/Library)
     - Calls: navigator.clipboard.writeText (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handlePwaInstall (Lines 1402-1411)
+  - Function/Scope: handlePwaInstall (Lines 1369-1378)
     - Calls: pwaPrompt.prompt (External/Library)
     - Calls: pwaPrompt.userChoice.then (External/Library)
     - Calls: setPwaPrompt (External/Library)
-  - Function/Scope: handleFocusTrajectory (Lines 1414-1427)
+  - Function/Scope: handleFocusTrajectory (Lines 1381-1394)
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: setCurrentLat (External/Library)
     - Calls: setCurrentLon (External/Library)
     - Calls: setMapMode (External/Library)
     - Calls: console.warn (External/Library)
-  - Function/Scope: handleFocusMD (Lines 1429-1440)
+  - Function/Scope: handleFocusMD (Lines 1396-1407)
     - Calls: md.coordinates.map (External/Library)
     - Calls: lats.reduce (External/Library)
     - Calls: lons.reduce (External/Library)
@@ -3608,47 +3607,14 @@ export default function App() {
 
     try {
       setIsAnalyzingTelemetry(true);
-      const res = await fetch('/api/telemetry-analysis', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          temperature: targetTelemetry.temperature,
-          dewPoint: targetTelemetry.dewPoint,
-          windSpeed: targetTelemetry.windSpeed,
-          windGust: targetTelemetry.windGust,
-          pressure: targetTelemetry.pressure,
-          cape: targetCape,
-          recentDiscussions: discussions.map(d => ({ number: d.number, headline: d.areasAffected })),
-          activeAlerts: alerts.map(a => a.event)
-        })
-      });
-
-      logNetworkRequest({
-        service: 'Analyzer',
-        url: '/api/telemetry-analysis',
-        method: 'POST',
-        status: res.status,
-        statusText: res.ok ? 'OK' : 'Error',
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      if (res.ok) {
-        const payload = await res.json();
-        setTornadogenesisData(payload);
-      } else {
-        console.warn('Server analyzer endpoint responded with error status:', res.status, '- activating client-side diagnostic fallback.');
-        throw new Error(`Server returned status: ${res.status}`);
-      }
-    } catch (e) {
-      console.warn('Utilizing client-side backup Solver core for convective parameters:', e);
-      // Scientific heuristic model running fully client-side to prevent network blocker aborts:
+      
+      // Scientific heuristic model running fully client-side (no backend route required, avoiding 405s):
       const tempF = parseFloat(String(targetTelemetry.temperature || '70'));
       const dewF = parseFloat(String(targetTelemetry.dewPoint || '60'));
       const windMph = parseFloat(String(targetTelemetry.windSpeed || '0'));
       const gustMph = parseFloat(String(targetTelemetry.windGust || '0'));
       const capeJkg = targetCape || 0;
+
 
       // 1. Moisture Metric (Favorable when dewpoint is high, depression is low)
       const depression = tempF - dewF;

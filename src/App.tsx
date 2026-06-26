@@ -1089,47 +1089,14 @@ export default function App() {
 
     try {
       setIsAnalyzingTelemetry(true);
-      const res = await fetch('/api/telemetry-analysis', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          temperature: targetTelemetry.temperature,
-          dewPoint: targetTelemetry.dewPoint,
-          windSpeed: targetTelemetry.windSpeed,
-          windGust: targetTelemetry.windGust,
-          pressure: targetTelemetry.pressure,
-          cape: targetCape,
-          recentDiscussions: discussions.map(d => ({ number: d.number, headline: d.areasAffected })),
-          activeAlerts: alerts.map(a => a.event)
-        })
-      });
-
-      logNetworkRequest({
-        service: 'Analyzer',
-        url: '/api/telemetry-analysis',
-        method: 'POST',
-        status: res.status,
-        statusText: res.ok ? 'OK' : 'Error',
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      if (res.ok) {
-        const payload = await res.json();
-        setTornadogenesisData(payload);
-      } else {
-        console.warn('Server analyzer endpoint responded with error status:', res.status, '- activating client-side diagnostic fallback.');
-        throw new Error(`Server returned status: ${res.status}`);
-      }
-    } catch (e) {
-      console.warn('Utilizing client-side backup Solver core for convective parameters:', e);
-      // Scientific heuristic model running fully client-side to prevent network blocker aborts:
+      
+      // Scientific heuristic model running fully client-side (no backend route required, avoiding 405s):
       const tempF = parseFloat(String(targetTelemetry.temperature || '70'));
       const dewF = parseFloat(String(targetTelemetry.dewPoint || '60'));
       const windMph = parseFloat(String(targetTelemetry.windSpeed || '0'));
       const gustMph = parseFloat(String(targetTelemetry.windGust || '0'));
       const capeJkg = targetCape || 0;
+
 
       // 1. Moisture Metric (Favorable when dewpoint is high, depression is low)
       const depression = tempF - dewF;
