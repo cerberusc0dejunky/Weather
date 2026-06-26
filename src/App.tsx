@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { NavLink, Outlet } from 'react-router';
 import { useToast } from './contexts/ToastContext';
 import { useStormSiren } from './hooks/useStormSiren';
 import { useNationalAlerts } from './hooks/useNationalAlerts';
@@ -15,6 +14,9 @@ import {
 } from './utils/geoUtils';
 import GeolocationModal from './components/GeolocationModal';
 import { ResolvedAlert } from './components/AlertHistory';
+import RadarMap from './components/RadarMap';
+import WindGauge from './components/WindGauge';
+import ThreatCard from './components/ThreatCard';
 
 // Lucide Icons
 import {
@@ -2350,53 +2352,366 @@ export default function App() {
           )}
         </header>
 
-        {/* Route Navigation Tab Bar */}
-        <div className="w-full flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 dark:border-slate-800/80 pb-4">
-          <nav className="flex bg-white dark:bg-slate-900/60 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800/80 gap-2 w-full md:w-auto self-start">
-            <NavLink
-              to="/map"
-              className={({ isActive }) =>
-                `px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer ${
-                  isActive
-                    ? 'bg-slate-950 dark:bg-slate-800 text-white shadow-md'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                }`
-              }
-            >
-              Radar Map
-            </NavLink>
-            <NavLink
-              to="/alerts"
-              className={({ isActive }) =>
-                `px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center gap-1.5 ${
-                  isActive
-                    ? 'bg-slate-950 dark:bg-slate-800 text-white shadow-md'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                }`
-              }
-            >
-              Proximity Alerts
-              {alerts.length > 0 && (
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
-              )}
-            </NavLink>
-            <NavLink
-              to="/telemetry"
-              className={({ isActive }) =>
-                `px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer ${
-                  isActive
-                    ? 'bg-slate-950 dark:bg-slate-800 text-white shadow-md'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                }`
-              }
-            >
-              Telemetry
-            </NavLink>
-          </nav>
-        </div>
+        {/* Unified Dashboard Layout Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left Column: Interactive Radar Map & Coordinate Anchor Manager (lg:span-7) */}
+          <div className="lg:col-span-7 flex flex-col gap-6">
+            <div className="w-full">
+              <RadarMap
+                userLat={currentLat}
+                userLon={currentLon}
+                assets={assets}
+                alerts={alerts}
+                activeThreats={alerts.filter((a: any) => a.threatLevel === 'High' || a.threatLevel === 'Extreme')}
+                discussions={discussions}
+                rotationPins={rotationPins}
+                mapMode={mapMode}
+                onMapModeChange={setMapMode}
+                onSetCoordinates={(lat: number, lon: number) => {
+                  setCurrentLat(lat);
+                  setCurrentLon(lon);
+                }}
+                customMapKey={customMapKey}
+                userMaskActive={settings.userMaskActive}
+              />
+            </div>
 
-        {/* Dynamic Route Content */}
-        <Outlet context={contextValue} />
+            {/* Spatial Interactive Disclaimer Panel */}
+            <div className="w-full p-4 bg-rose-50 dark:bg-rose-955/10 border border-rose-200 dark:border-red-500/20 rounded-2xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
+              <Info className="w-5 h-5 text-rose-600 dark:text-red-500 shrink-0" />
+              <p className="text-[10px] font-bold leading-relaxed uppercase tracking-tight">
+                Disclaimer: DAISY is built as secondary informational tracking only. Do not rely solely on DAISY for life-safety choices in critical scenarios.
+              </p>
+            </div>
+
+            {/* Anchor Coordinates Manager */}
+            <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors" aria-label="Coordinates Manager">
+              <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-cyan-600 dark:text-neon-aqua" />
+                Monitored Coordinates Anchor
+              </h3>
+
+              <div className="flex flex-col md:flex-row gap-5 items-start">
+                <div className="w-full md:w-1/3 relative shrink-0">
+                  <input
+                    type="text"
+                    id="searchQuery"
+                    name="searchQuery"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddNewPin()}
+                    placeholder="Enter US City, Zip, or Address"
+                    disabled={searching}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 font-sans text-xs font-bold py-3 pl-4 pr-10 rounded-xl focus:border-neon-aqua focus:ring-0 outline-none disabled:opacity-50"
+                    autoComplete="street-address"
+                  />
+                  <button
+                    onClick={handleAddNewPin}
+                    disabled={searching}
+                    className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="w-full md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
+                  {assets.length === 0 ? (
+                    <div className="col-span-full p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[10px] font-mono font-extrabold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                      No active tracking anchors
+                    </div>
+                  ) : (
+                    assets.map((asset: any) => (
+                      <div
+                        key={asset.id}
+                        onClick={() => {
+                          setCurrentLat(asset.lat);
+                          setCurrentLon(asset.lon);
+                          fetchTelemetry(asset.lat, asset.lon);
+                        }}
+                        className={`py-2 px-3 border rounded-xl flex items-center justify-between gap-3 font-sans transition-all cursor-pointer ${
+                          Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001
+                            ? 'bg-cyan-500/10 border-cyan-500 dark:border-neon-aqua/70 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-705'
+                        }`}
+                      >
+                        <div className="truncate flex-grow">
+                          <span className="text-[10px] font-black uppercase text-slate-800 dark:text-white block truncate">
+                            {asset.name}
+                            {Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001 && (
+                              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                            )}
+                          </span>
+                          <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-slate-500 block mt-0.5">
+                            LAT: {asset.lat.toFixed(3)}, LON: {asset.lon.toFixed(3)}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemovePin(asset.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-500 dark:hover:text-neon-pink shrink-0 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* Right Column: Proximity Alerts & Microclimate Ground Telemetry (lg:span-5) */}
+          <div className="lg:col-span-5 flex flex-col gap-6">
+            {/* Ground Surface Air Telemetry */}
+            <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="NWS Telemetry and Forecast Microclimate Analysis">
+              <div>
+                <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                  Ground Surface Air Telemetry (NWS ASOS) & Forecast Trends
+                </h3>
+                
+                {telemetry ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-slate-55 dark:bg-slate-950 border border-slate-205 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Thermometer className="w-7 h-7 text-rose-500 dark:text-neon-pink shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Temp / Dew</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block">
+                            {telemetry.temperature ? `${telemetry.temperature}°F` : 'N/A'}{' '}
+                            <span className="text-slate-500 dark:text-slate-400 text-[10px] font-semibold">({telemetry.dewPoint || '--'}°)</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-55 dark:bg-slate-950 border border-slate-205 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Wind className="w-7 h-7 text-cyan-600 dark:text-neon-aqua shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Surf Wind</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                            {telemetry.windSpeed ? `${telemetry.windSpeed} mph` : 'Calm'}
+                            {telemetry.windGust && (
+                              <span className="text-rose-500 dark:text-neon-pink text-[10px] font-bold block">G: {telemetry.windGust} mph</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-55 dark:bg-slate-950 border border-slate-205 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Gauge className="w-7 h-7 text-slate-400 dark:text-white/50 shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Baro Pres</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                            {telemetry.pressure ? `${telemetry.pressure} InHg` : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-55 dark:bg-slate-950 border border-slate-205 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Compass className="w-7 h-7 text-indigo-500 dark:text-indigo-400 shrink-0 animate-[spin_12s_linear_infinite]" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Weather</span>
+                          <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 mt-1 block truncate max-w-[110px] uppercase">
+                            {telemetry.textDescription || 'Stable conditions'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <WindGauge
+                      windSpeed={telemetry.windSpeed}
+                      windGust={telemetry.windGust}
+                    />
+                  </>
+                ) : (
+                  <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-205 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[9px] uppercase text-center rounded-xl">
+                    Synchronizing closest station observational grids...
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800/50 flex flex-col gap-4">
+                <div className="flex justify-between items-start gap-4">
+                  <div>
+                    <h4 className="text-slate-800 dark:text-white text-xs font-extrabold uppercase tracking-wide">
+                      Predictive Forecast Trends
+                    </h4>
+                    <p className="text-[9px] font-mono text-slate-400 dark:text-slate-500 uppercase mt-0.5">
+                      Bypass Shield Probability Indicator
+                    </p>
+                  </div>
+                  <div className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1.5 uppercase tracking-wider ${forecastTrend.badgeColor}`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>
+                    {forecastTrend.status}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl">
+                  <span className="text-[10px] font-black text-slate-800 dark:text-white block uppercase leading-snug">{forecastTrend.trendLabel}</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{forecastTrend.statusDesc}</p>
+                </div>
+
+                <div className="flex justify-between items-center text-[10px] font-bold bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl">
+                  <span className="text-slate-500 uppercase">Shield Success chance:</span>
+                  <span className={`font-black ${forecastTrend.textColor}`}>{forecastTrend.bypassChance}</span>
+                </div>
+
+                <button
+                  type="button"
+                  id="open-vtp-modal-btn"
+                  onClick={() => {
+                    fetchTelemetryAnalysis();
+                    setShowTornadogenesisModal(true);
+                  }}
+                  className="w-full py-2.5 px-4 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 hover:border-cyan-400 dark:hover:border-neon-aqua hover:text-cyan-600 dark:hover:text-neon-aqua text-slate-800 dark:text-slate-200 font-black uppercase text-[10px] tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Flame className="w-4 h-4 text-orange-500 animate-pulse" />
+                  <span>Genesis probability core</span>
+                </button>
+              </div>
+            </section>
+
+            {/* Active Proximity Alerts */}
+            <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm">
+              <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800/80 pb-3 mb-4">
+                <h2 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <Radio className="w-4.5 h-4.5 text-rose-500 dark:text-neon-pink animate-pulse" />
+                  Proximity Alert Board
+                </h2>
+                {alerts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHeadedTowardsOnly(p => !p)}
+                    className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-colors ${
+                      showHeadedTowardsOnly
+                        ? 'bg-rose-500/10 border-rose-500 text-rose-500'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {showHeadedTowardsOnly ? 'Headed Only' : 'All Alerts'}
+                  </button>
+                )}
+              </div>
+
+              {alerts.length === 0 ? (
+                <div className="bg-slate-50 dark:bg-slate-950/20 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center">
+                  <ShieldCheck className="w-10 h-10 text-teal-600 dark:text-neon-aqua mx-auto mb-2 animate-pulse" />
+                  <h3 className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-wider">System Clear</h3>
+                  <p className="text-[10px] text-slate-500 leading-relaxed mt-1">No active convective warning polygons intersecting tracking grids.</p>
+                </div>
+              ) : (
+                (() => {
+                  const displayedAlerts = showHeadedTowardsOnly
+                    ? alerts.filter((alert: any) => alert.headedTowards || alert.isDirectHit)
+                    : alerts;
+
+                  if (displayedAlerts.length === 0) {
+                    return (
+                      <div className="text-center p-6 bg-slate-50 dark:bg-slate-950/20 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                        <p className="text-[10px] text-slate-500 uppercase font-black tracking-wide">No alerts directly in your path.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4 max-h-[360px] overflow-y-auto pr-1">
+                      {displayedAlerts.map((alert: any) => (
+                        <ThreatCard
+                          key={alert.id}
+                          alert={alert}
+                          hasAssets={assets.length > 0}
+                          onViewTrajectory={handleFocusTrajectory}
+                          userMaskActive={settings.userMaskActive}
+                        />
+                      ))}
+                    </div>
+                  );
+                })()
+              )}
+            </section>
+
+            {/* SPC Convective Discussions */}
+            <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm">
+              <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800/80 pb-3 mb-4">
+                <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider">
+                  SPC Discussions
+                </h3>
+                <button
+                  onClick={() => setShowMDInputForm(!showMDInputForm)}
+                  className="text-[9px] font-black uppercase text-amber-500 hover:text-amber-400 transition-colors"
+                >
+                  {showMDInputForm ? 'Close Panel' : 'Feed Text'}
+                </button>
+              </div>
+
+              {showMDInputForm && (
+                <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl mb-4">
+                  <textarea
+                    id="newMDText"
+                    name="newMDText"
+                    value={newMDText}
+                    onChange={(e) => setNewMDText(e.target.value)}
+                    placeholder="Paste raw SPC MD text..."
+                    rows={4}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[10px] p-2 rounded-lg outline-none font-mono focus:border-amber-500"
+                  />
+                  <button
+                    onClick={() => {
+                      handleAddCustomMD(newMDText);
+                      setNewMDText('');
+                      setShowMDInputForm(false);
+                    }}
+                    className="w-full mt-2 py-1.5 bg-amber-500 text-slate-950 text-[9px] font-black uppercase tracking-wider rounded-lg"
+                  >
+                    Parse Discussion
+                  </button>
+                </div>
+              )}
+
+              {discussions.length === 0 ? (
+                <div className="p-4 text-center text-[10px] text-slate-500 uppercase tracking-widest font-mono">
+                  Loading SPC Forecast tracks...
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                  {discussions.map((md: any) => {
+                    const isExpanded = expandedMDId === md.id;
+                    const isIntersecting = md.isIntersecting;
+                    return (
+                      <div key={md.id} className={`p-3.5 border rounded-2xl bg-slate-50 dark:bg-slate-950/40 hover:border-slate-350 dark:hover:border-slate-800 transition ${isIntersecting ? 'border-amber-500' : 'border-slate-200 dark:border-slate-800/80'}`}>
+                        <div className="flex justify-between items-start gap-2.5">
+                          <span className="px-1.5 py-0.5 bg-amber-500 text-slate-950 text-[8px] font-black uppercase rounded shrink-0">
+                            #MCD {md.number}
+                          </span>
+                          <span className="text-[10px] font-black text-slate-800 dark:text-white truncate">
+                            {md.areasAffected}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2 font-medium leading-relaxed line-clamp-3">
+                          {md.summary}
+                        </p>
+                        <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-200/50 dark:border-slate-800/50">
+                          <span className="text-[9px] font-mono text-slate-400">
+                            Watch Prob: <strong className="text-slate-800 dark:text-white">{md.probability}%</strong>
+                          </span>
+                          <button
+                            onClick={() => handleFocusMD(md)}
+                            className="text-[8px] font-black uppercase text-cyan-600 dark:text-neon-aqua hover:underline"
+                          >
+                            Locate Corridor
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
       </div>
     </div>
   );

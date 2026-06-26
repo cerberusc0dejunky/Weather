@@ -1,8 +1,8 @@
 ================================================================================
 CODEBASE BUNDLE FOR NOTEBOOKLM
-Generated: 2026-06-26T06:01:20.171Z
+Generated: 2026-06-26T06:39:25.654Z
 Project Root: C:\Users\Quant\Projects\D.A.I.S.Y
-Total Files Compiled: 30
+Total Files Compiled: 31
 ================================================================================
 
 ================================================================================
@@ -19,6 +19,7 @@ DIRECTORY TREE STRUCTURE
 │   ├── components/
 │   │   ├── AlertHistory.tsx
 │   │   ├── CapeHistoryChart.tsx
+│   │   ├── ErrorBoundary.tsx
 │   │   ├── GeolocationModal.tsx
 │   │   ├── PressureBaroTooltip.tsx
 │   │   ├── RadarMap.tsx
@@ -277,7 +278,7 @@ FUNCTION CALL HIERARCHY
     - Calls: console.log (External/Library)
 
 - File: src/App.tsx
-  - Function/Scope: parseMesoscaleDiscussion (Lines 53-105)
+  - Function/Scope: parseMesoscaleDiscussion (Lines 55-107)
     - Calls: text.match (External/Library)
     - Calls: areasMatch[1].indexOf (External/Library)
     - Calls: areasMatch[1].substring(0, endIdx).trim (External/Library)
@@ -295,7 +296,7 @@ FUNCTION CALL HIERARCHY
     - Calls: summaryMatch[1].replace(/\r?\n\s*/g, ' ').trim (External/Library)
     - Calls: summaryMatch[1].replace (External/Library)
     - Calls: parseSPCLatLon (Imported from src/utils/geoUtils.ts)
-  - Function/Scope: translateAlertsToRotationPins (Lines 107-174)
+  - Function/Scope: translateAlertsToRotationPins (Lines 109-176)
     - Calls: activeAlerts.forEach (External/Library)
     - Calls: `${alert.event} ${alert.description || ''} ${alert.instruction || ''} ${alert.snippet || ''}`.toUpperCase (External/Library)
     - Calls: fullText.includes (External/Library)
@@ -304,7 +305,7 @@ FUNCTION CALL HIERARCHY
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: pins.push (External/Library)
     - Calls: new Date().toISOString (External/Library)
-  - Function/Scope: App (Lines 176-2403)
+  - Function/Scope: App (Lines 178-2718)
     - Calls: useToast (Imported from src/contexts/ToastContext.tsx)
     - Calls: useStormSiren (Imported from src/hooks/useStormSiren.ts)
     - Calls: useState (Library/external import (react))
@@ -602,34 +603,77 @@ FUNCTION CALL HIERARCHY
     - Calls: Object.keys (External/Library)
     - Calls: Object.entries(log.headers).map (External/Library)
     - Calls: Object.entries (External/Library)
-  - Function/Scope: listenOnline (Lines 358-358)
+    - Calls: alerts.filter (External/Library)
+    - Calls: setCurrentLat (External/Library)
+    - Calls: setCurrentLon (External/Library)
+    - Calls: setSearchQuery (External/Library)
+    - Calls: handleAddNewPin (Local)
+    - Calls: assets.map (External/Library)
+    - Calls: fetchTelemetry (External/Library)
+    - Calls: asset.lat.toFixed (External/Library)
+    - Calls: asset.lon.toFixed (External/Library)
+    - Calls: handleRemovePin (Local)
+    - Calls: setShowHeadedTowardsOnly (External/Library)
+    - Calls: (() => {
+                  const displayedAlerts = showHeadedTowardsOnly
+                    ? alerts.filter((alert: any) => alert.headedTowards || alert.isDirectHit)
+                    : alerts;
+
+                  if (displayedAlerts.length === 0) {
+                    return (
+                      <div className="text-center p-6 bg-slate-50 dark:bg-slate-950/20 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                        <p className="text-[10px] text-slate-500 uppercase font-black tracking-wide">No alerts directly in your path.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4 max-h-[360px] overflow-y-auto pr-1">
+                      {displayedAlerts.map((alert: any) => (
+                        <ThreatCard
+                          key={alert.id}
+                          alert={alert}
+                          hasAssets={assets.length > 0}
+                          onViewTrajectory={handleFocusTrajectory}
+                          userMaskActive={settings.userMaskActive}
+                        />
+                      ))}
+                    </div>
+                  );
+                }) (External/Library)
+    - Calls: displayedAlerts.map (External/Library)
+    - Calls: setShowMDInputForm (External/Library)
+    - Calls: setNewMDText (External/Library)
+    - Calls: handleAddCustomMD (Local)
+    - Calls: handleFocusMD (Local)
+  - Function/Scope: listenOnline (Lines 360-360)
     - Calls: setConnectionOnline (External/Library)
-  - Function/Scope: listenOffline (Lines 359-359)
+  - Function/Scope: listenOffline (Lines 361-361)
     - Calls: setConnectionOnline (External/Library)
-  - Function/Scope: capturePrompt (Lines 370-373)
+  - Function/Scope: capturePrompt (Lines 372-375)
     - Calls: e.preventDefault (External/Library)
     - Calls: setPwaPrompt (External/Library)
-  - Function/Scope: parseTempToF (Lines 546-553)
+  - Function/Scope: parseTempToF (Lines 548-555)
     - Calls: (((val - 273.15) * 9) / 5 + 32).toFixed (External/Library)
     - Calls: ((val * 9) / 5 + 32).toFixed (External/Library)
-  - Function/Scope: parseWindToMph (Lines 555-560)
+  - Function/Scope: parseWindToMph (Lines 557-562)
     - Calls: isNaN (External/Library)
     - Calls: mph.toFixed (External/Library)
-  - Function/Scope: parsePaToInHg (Lines 562-565)
+  - Function/Scope: parsePaToInHg (Lines 564-567)
     - Calls: (val * 0.0002953).toFixed (External/Library)
-  - Function/Scope: cToF (Lines 831-834)
+  - Function/Scope: cToF (Lines 833-836)
     - Calls: ((val * 9) / 5 + 32).toFixed (External/Library)
-  - Function/Scope: mpsToMph (Lines 836-841)
+  - Function/Scope: mpsToMph (Lines 838-843)
     - Calls: isNaN (External/Library)
     - Calls: mph.toFixed (External/Library)
-  - Function/Scope: paToInHg (Lines 843-846)
+  - Function/Scope: paToInHg (Lines 845-848)
     - Calls: (val * 0.0002953).toFixed (External/Library)
-  - Function/Scope: checkExpiredAlerts (Lines 1023-1034)
+  - Function/Scope: checkExpiredAlerts (Lines 1025-1036)
     - Calls: setAlerts (External/Library)
     - Calls: prevAlerts.filter (External/Library)
     - Calls: addAlertsToHistoryRef.current (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleAddNewPin (Lines 1137-1182)
+  - Function/Scope: handleAddNewPin (Lines 1139-1184)
     - Calls: searchQuery.trim (External/Library)
     - Calls: setSearching (External/Library)
     - Calls: encodeURIComponent (External/Library)
@@ -647,10 +691,10 @@ FUNCTION CALL HIERARCHY
     - Calls: fetchTelemetryRef.current (External/Library)
     - Calls: triggerToast (External/Library)
     - Calls: console.error (External/Library)
-  - Function/Scope: handleRemovePin (Lines 1184-1186)
+  - Function/Scope: handleRemovePin (Lines 1186-1188)
     - Calls: setAssets (External/Library)
     - Calls: prev.filter (External/Library)
-  - Function/Scope: handleAddCustomMD (Lines 1188-1197)
+  - Function/Scope: handleAddCustomMD (Lines 1190-1199)
     - Calls: inputText.trim (External/Library)
     - Calls: parseMesoscaleDiscussion (Local)
     - Calls: Date.now (External/Library)
@@ -658,7 +702,7 @@ FUNCTION CALL HIERARCHY
     - Calls: setCustomMDs (External/Library)
     - Calls: console.warn (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleArmActivation (Lines 1200-1271)
+  - Function/Scope: handleArmActivation (Lines 1202-1273)
     - Calls: setIsActivating (External/Library)
     - Calls: setLocationError (External/Library)
     - Calls: navigator.geolocation.getCurrentPosition (External/Library)
@@ -674,39 +718,39 @@ FUNCTION CALL HIERARCHY
     - Calls: setShowTermsModal (External/Library)
     - Calls: triggerToast (External/Library)
     - Calls: console.warn (External/Library)
-  - Function/Scope: handleLocationAccept (Lines 1273-1275)
+  - Function/Scope: handleLocationAccept (Lines 1275-1277)
     - Calls: handleArmActivation (Local)
-  - Function/Scope: handleLocationDecline (Lines 1277-1281)
+  - Function/Scope: handleLocationDecline (Lines 1279-1283)
     - Calls: setIsActivating (External/Library)
     - Calls: setLocationError (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleClearAlertHistory (Lines 1283-1286)
+  - Function/Scope: handleClearAlertHistory (Lines 1285-1288)
     - Calls: setAlertHistory (External/Library)
     - Calls: localStorage.removeItem (External/Library)
-  - Function/Scope: handleRemoveAlertHistoryItem (Lines 1288-1294)
+  - Function/Scope: handleRemoveAlertHistoryItem (Lines 1290-1296)
     - Calls: setAlertHistory (External/Library)
     - Calls: prev.filter (External/Library)
     - Calls: localStorage.setItem (External/Library)
     - Calls: JSON.stringify (External/Library)
-  - Function/Scope: handleTestSiren (Lines 1297-1300)
+  - Function/Scope: handleTestSiren (Lines 1299-1302)
     - Calls: playSiren (External/Library)
     - Calls: setTimeout (External/Library)
     - Calls: stopSiren (External/Library)
-  - Function/Scope: handleShareApp (Lines 1303-1319)
+  - Function/Scope: handleShareApp (Lines 1305-1321)
     - Calls: navigator.share (External/Library)
     - Calls: navigator.clipboard.writeText (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handlePwaInstall (Lines 1322-1331)
+  - Function/Scope: handlePwaInstall (Lines 1324-1333)
     - Calls: pwaPrompt.prompt (External/Library)
     - Calls: pwaPrompt.userChoice.then (External/Library)
     - Calls: setPwaPrompt (External/Library)
-  - Function/Scope: handleFocusTrajectory (Lines 1334-1347)
+  - Function/Scope: handleFocusTrajectory (Lines 1336-1349)
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: setCurrentLat (External/Library)
     - Calls: setCurrentLon (External/Library)
     - Calls: setMapMode (External/Library)
     - Calls: console.warn (External/Library)
-  - Function/Scope: handleFocusMD (Lines 1349-1360)
+  - Function/Scope: handleFocusMD (Lines 1351-1362)
     - Calls: md.coordinates.map (External/Library)
     - Calls: lats.reduce (External/Library)
     - Calls: lons.reduce (External/Library)
@@ -735,6 +779,26 @@ FUNCTION CALL HIERARCHY
     - (No call expressions detected)
   - Function/Scope: CustomTooltip (Lines 52-70)
     - Calls: getInstabilityLevel (Local)
+
+- File: src/components/ErrorBoundary.tsx
+  - Function/Scope: constructor (Lines 18-25)
+    - Calls: super (External/Library)
+  - Function/Scope: getDerivedStateFromError (Lines 27-29)
+    - (No call expressions detected)
+  - Function/Scope: componentDidCatch (Lines 31-33)
+    - Calls: console.error (External/Library)
+  - Function/Scope: render (Lines 35-41)
+    - Calls: (this as any).setState (External/Library)
+  - Function/Scope: RouteErrorElement (Lines 44-54)
+    - Calls: useRouteError (Library/external import (react-router))
+    - Calls: useNavigate (Library/external import (react-router))
+    - Calls: JSON.stringify (External/Library)
+    - Calls: navigate (External/Library)
+  - Function/Scope: ErrorFallbackPage (Lines 61-124)
+    - Calls: React.useState (Library/external import (react))
+    - Calls: resetError (External/Library)
+    - Calls: window.location.reload (External/Library)
+    - Calls: setShowDetails (External/Library)
 
 - File: src/components/GeolocationModal.tsx
   - Function/Scope: GeolocationModal (Lines 8-66)
@@ -1289,7 +1353,7 @@ FUNCTION CALL HIERARCHY
     - Calls: console.warn (External/Library)
 
 - File: src/router.tsx
-  - Function/Scope: <top-level> (Lines 1-34)
+  - Function/Scope: <top-level> (Lines 1-15)
     - Calls: createBrowserRouter (Library/external import (react-router))
 
 - File: src/routes/AlertsView.tsx
@@ -1371,28 +1435,37 @@ FUNCTION CALL HIERARCHY
     - Calls: setExpandedMDId (External/Library)
 
 - File: src/utils/geoUtils.ts
-  - Function/Scope: getDistance (Lines 1-12)
+  - Function/Scope: getDistance (Lines 9-20)
     - Calls: Math.sin (External/Library)
     - Calls: Math.cos (External/Library)
     - Calls: Math.atan2 (External/Library)
     - Calls: Math.sqrt (External/Library)
-  - Function/Scope: getBearing (Lines 14-22)
+  - Function/Scope: getBearing (Lines 22-30)
     - Calls: Math.sin (External/Library)
     - Calls: Math.cos (External/Library)
     - Calls: Math.atan2 (External/Library)
-  - Function/Scope: isLeft (Lines 47-49)
-    - (No call expressions detected)
-  - Function/Scope: isPointInPolygon (Lines 51-77)
-    - Calls: isLeft (Local)
-  - Function/Scope: getMinPolygonDistance (Lines 79-117)
+  - Function/Scope: isPointInPolygon (Lines 59-73)
+    - Calls: point (Library/external import (@turf/turf))
+    - Calls: turfPolygon (Library/external import (@turf/turf))
+    - Calls: booleanPointInPolygon (Library/external import (@turf/turf))
+  - Function/Scope: getMinPolygonDistance (Lines 81-162)
+    - Calls: point (Library/external import (@turf/turf))
+    - Calls: Array.isArray (External/Library)
+    - Calls: processRings (Local)
     - Calls: traverse (Local)
-  - Function/Scope: traverse (Lines 88-113)
+  - Function/Scope: processRings (Lines 92-130)
+    - Calls: Array.isArray (External/Library)
+    - Calls: ring.map (External/Library)
+    - Calls: turfPolygon (Library/external import (@turf/turf))
+    - Calls: booleanPointInPolygon (Library/external import (@turf/turf))
+    - Calls: lineString (Library/external import (@turf/turf))
+    - Calls: nearestPointOnLine (Library/external import (@turf/turf))
+    - Calls: getDistance (Local)
+  - Function/Scope: traverse (Lines 148-156)
     - Calls: Array.isArray (External/Library)
     - Calls: getDistance (Local)
-    - Calls: arr.map (External/Library)
-    - Calls: isPointInPolygon (Local)
     - Calls: traverse (Local)
-  - Function/Scope: getMemoizedMinPolygonDistance (Lines 127-153)
+  - Function/Scope: getMemoizedMinPolygonDistance (Lines 172-198)
     - Calls: getMinPolygonDistance (Local)
     - Calls: assetLat.toFixed (External/Library)
     - Calls: assetLon.toFixed (External/Library)
@@ -1400,18 +1473,18 @@ FUNCTION CALL HIERARCHY
     - Calls: polygonDistanceCache.get (External/Library)
     - Calls: polygonDistanceCache.clear (External/Library)
     - Calls: polygonDistanceCache.set (External/Library)
-  - Function/Scope: getGeometryCentroid (Lines 155-183)
+  - Function/Scope: getGeometryCentroid (Lines 200-228)
     - Calls: traverse (Local)
-  - Function/Scope: traverse (Lines 160-176)
+  - Function/Scope: traverse (Lines 205-221)
     - Calls: Array.isArray (External/Library)
     - Calls: traverse (Local)
-  - Function/Scope: formatAddress (Lines 239-251)
+  - Function/Scope: formatAddress (Lines 284-296)
     - Calls: fallback.toUpperCase (External/Library)
     - Calls: addr.state.toUpperCase (External/Library)
     - Calls: `${city}${state ? ', ' + state : ''}`.toUpperCase (External/Library)
     - Calls: `${addr.county.replace(/ County/i, '')}${state ? ', ' + state : ''}`.toUpperCase (External/Library)
     - Calls: addr.county.replace (External/Library)
-  - Function/Scope: parseSPCLatLon (Lines 253-290)
+  - Function/Scope: parseSPCLatLon (Lines 298-335)
     - Calls: text.split (External/Library)
     - Calls: line.includes (External/Library)
     - Calls: line.replace (External/Library)
@@ -1421,12 +1494,15 @@ FUNCTION CALL HIERARCHY
     - Calls: match.substring (External/Library)
     - Calls: parseInt (External/Library)
     - Calls: coordinates.push (External/Library)
-  - Function/Scope: isPointInParsedPolygon (Lines 292-318)
-    - Calls: isLeft (Local)
-  - Function/Scope: getParsedPolygonMinDistance (Lines 320-342)
+  - Function/Scope: isPointInParsedPolygon (Lines 337-353)
+    - Calls: polygon.map (External/Library)
+    - Calls: point (Library/external import (@turf/turf))
+    - Calls: turfPolygon (Library/external import (@turf/turf))
+    - Calls: booleanPointInPolygon (Library/external import (@turf/turf))
+  - Function/Scope: getParsedPolygonMinDistance (Lines 356-378)
     - Calls: isPointInParsedPolygon (Local)
     - Calls: getDistance (Local)
-  - Function/Scope: parseStormTrajectory (Lines 355-402)
+  - Function/Scope: parseStormTrajectory (Lines 391-438)
     - Calls: text.match (External/Library)
     - Calls: match[1].toUpperCase (External/Library)
     - Calls: parseInt (External/Library)
@@ -1458,7 +1534,7 @@ FUNCTION CALL HIERARCHY
     - Calls: setNotification (External/Library)
 
 - File: vite.config.ts
-  - Function/Scope: <top-level> (Lines 1-23)
+  - Function/Scope: <top-level> (Lines 1-24)
     - Calls: defineConfig (Library/external import (vite))
     - Calls: react (Library/external import (@vitejs/plugin-react))
     - Calls: tailwindcss (Library/external import (@tailwindcss/vite))
@@ -2106,7 +2182,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = 5500;
 
 app.use(express.json());
 
@@ -2438,7 +2514,6 @@ startServer();
 FILE: src/App.tsx
 ================================================================================
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { NavLink, Outlet } from 'react-router';
 import { useToast } from './contexts/ToastContext';
 import { useStormSiren } from './hooks/useStormSiren';
 import { useNationalAlerts } from './hooks/useNationalAlerts';
@@ -2454,6 +2529,9 @@ import {
 } from './utils/geoUtils';
 import GeolocationModal from './components/GeolocationModal';
 import { ResolvedAlert } from './components/AlertHistory';
+import RadarMap from './components/RadarMap';
+import WindGauge from './components/WindGauge';
+import ThreatCard from './components/ThreatCard';
 
 // Lucide Icons
 import {
@@ -4789,53 +4867,366 @@ export default function App() {
           )}
         </header>
 
-        {/* Route Navigation Tab Bar */}
-        <div className="w-full flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 dark:border-slate-800/80 pb-4">
-          <nav className="flex bg-white dark:bg-slate-900/60 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800/80 gap-2 w-full md:w-auto self-start">
-            <NavLink
-              to="/map"
-              className={({ isActive }) =>
-                `px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer ${
-                  isActive
-                    ? 'bg-slate-950 dark:bg-slate-800 text-white shadow-md'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                }`
-              }
-            >
-              Radar Map
-            </NavLink>
-            <NavLink
-              to="/alerts"
-              className={({ isActive }) =>
-                `px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center gap-1.5 ${
-                  isActive
-                    ? 'bg-slate-950 dark:bg-slate-800 text-white shadow-md'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                }`
-              }
-            >
-              Proximity Alerts
-              {alerts.length > 0 && (
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
-              )}
-            </NavLink>
-            <NavLink
-              to="/telemetry"
-              className={({ isActive }) =>
-                `px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer ${
-                  isActive
-                    ? 'bg-slate-950 dark:bg-slate-800 text-white shadow-md'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-                }`
-              }
-            >
-              Telemetry
-            </NavLink>
-          </nav>
-        </div>
+        {/* Unified Dashboard Layout Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Left Column: Interactive Radar Map & Coordinate Anchor Manager (lg:span-7) */}
+          <div className="lg:col-span-7 flex flex-col gap-6">
+            <div className="w-full">
+              <RadarMap
+                userLat={currentLat}
+                userLon={currentLon}
+                assets={assets}
+                alerts={alerts}
+                activeThreats={alerts.filter((a: any) => a.threatLevel === 'High' || a.threatLevel === 'Extreme')}
+                discussions={discussions}
+                rotationPins={rotationPins}
+                mapMode={mapMode}
+                onMapModeChange={setMapMode}
+                onSetCoordinates={(lat: number, lon: number) => {
+                  setCurrentLat(lat);
+                  setCurrentLon(lon);
+                }}
+                customMapKey={customMapKey}
+                userMaskActive={settings.userMaskActive}
+              />
+            </div>
 
-        {/* Dynamic Route Content */}
-        <Outlet context={contextValue} />
+            {/* Spatial Interactive Disclaimer Panel */}
+            <div className="w-full p-4 bg-rose-50 dark:bg-rose-955/10 border border-rose-200 dark:border-red-500/20 rounded-2xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
+              <Info className="w-5 h-5 text-rose-600 dark:text-red-500 shrink-0" />
+              <p className="text-[10px] font-bold leading-relaxed uppercase tracking-tight">
+                Disclaimer: DAISY is built as secondary informational tracking only. Do not rely solely on DAISY for life-safety choices in critical scenarios.
+              </p>
+            </div>
+
+            {/* Anchor Coordinates Manager */}
+            <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors" aria-label="Coordinates Manager">
+              <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-cyan-600 dark:text-neon-aqua" />
+                Monitored Coordinates Anchor
+              </h3>
+
+              <div className="flex flex-col md:flex-row gap-5 items-start">
+                <div className="w-full md:w-1/3 relative shrink-0">
+                  <input
+                    type="text"
+                    id="searchQuery"
+                    name="searchQuery"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddNewPin()}
+                    placeholder="Enter US City, Zip, or Address"
+                    disabled={searching}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 font-sans text-xs font-bold py-3 pl-4 pr-10 rounded-xl focus:border-neon-aqua focus:ring-0 outline-none disabled:opacity-50"
+                    autoComplete="street-address"
+                  />
+                  <button
+                    onClick={handleAddNewPin}
+                    disabled={searching}
+                    className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="w-full md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
+                  {assets.length === 0 ? (
+                    <div className="col-span-full p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[10px] font-mono font-extrabold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                      No active tracking anchors
+                    </div>
+                  ) : (
+                    assets.map((asset: any) => (
+                      <div
+                        key={asset.id}
+                        onClick={() => {
+                          setCurrentLat(asset.lat);
+                          setCurrentLon(asset.lon);
+                          fetchTelemetry(asset.lat, asset.lon);
+                        }}
+                        className={`py-2 px-3 border rounded-xl flex items-center justify-between gap-3 font-sans transition-all cursor-pointer ${
+                          Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001
+                            ? 'bg-cyan-500/10 border-cyan-500 dark:border-neon-aqua/70 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-705'
+                        }`}
+                      >
+                        <div className="truncate flex-grow">
+                          <span className="text-[10px] font-black uppercase text-slate-800 dark:text-white block truncate">
+                            {asset.name}
+                            {Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001 && (
+                              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                            )}
+                          </span>
+                          <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-slate-500 block mt-0.5">
+                            LAT: {asset.lat.toFixed(3)}, LON: {asset.lon.toFixed(3)}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemovePin(asset.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-500 dark:hover:text-neon-pink shrink-0 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* Right Column: Proximity Alerts & Microclimate Ground Telemetry (lg:span-5) */}
+          <div className="lg:col-span-5 flex flex-col gap-6">
+            {/* Ground Surface Air Telemetry */}
+            <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="NWS Telemetry and Forecast Microclimate Analysis">
+              <div>
+                <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                  Ground Surface Air Telemetry (NWS ASOS) & Forecast Trends
+                </h3>
+                
+                {telemetry ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-slate-55 dark:bg-slate-950 border border-slate-205 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Thermometer className="w-7 h-7 text-rose-500 dark:text-neon-pink shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Temp / Dew</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block">
+                            {telemetry.temperature ? `${telemetry.temperature}°F` : 'N/A'}{' '}
+                            <span className="text-slate-500 dark:text-slate-400 text-[10px] font-semibold">({telemetry.dewPoint || '--'}°)</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-55 dark:bg-slate-950 border border-slate-205 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Wind className="w-7 h-7 text-cyan-600 dark:text-neon-aqua shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Surf Wind</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                            {telemetry.windSpeed ? `${telemetry.windSpeed} mph` : 'Calm'}
+                            {telemetry.windGust && (
+                              <span className="text-rose-500 dark:text-neon-pink text-[10px] font-bold block">G: {telemetry.windGust} mph</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-55 dark:bg-slate-950 border border-slate-205 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Gauge className="w-7 h-7 text-slate-400 dark:text-white/50 shrink-0" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Baro Pres</span>
+                          <span className="text-xs font-black text-slate-800 dark:text-white mt-1 block uppercase">
+                            {telemetry.pressure ? `${telemetry.pressure} InHg` : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-55 dark:bg-slate-950 border border-slate-205 dark:border-slate-800/80 p-3 rounded-xl flex items-center gap-2 transition-colors">
+                        <Compass className="w-7 h-7 text-indigo-500 dark:text-indigo-400 shrink-0 animate-[spin_12s_linear_infinite]" />
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block leading-none">Weather</span>
+                          <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 mt-1 block truncate max-w-[110px] uppercase">
+                            {telemetry.textDescription || 'Stable conditions'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <WindGauge
+                      windSpeed={telemetry.windSpeed}
+                      windGust={telemetry.windGust}
+                    />
+                  </>
+                ) : (
+                  <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-205 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[9px] uppercase text-center rounded-xl">
+                    Synchronizing closest station observational grids...
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800/50 flex flex-col gap-4">
+                <div className="flex justify-between items-start gap-4">
+                  <div>
+                    <h4 className="text-slate-800 dark:text-white text-xs font-extrabold uppercase tracking-wide">
+                      Predictive Forecast Trends
+                    </h4>
+                    <p className="text-[9px] font-mono text-slate-400 dark:text-slate-500 uppercase mt-0.5">
+                      Bypass Shield Probability Indicator
+                    </p>
+                  </div>
+                  <div className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1.5 uppercase tracking-wider ${forecastTrend.badgeColor}`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>
+                    {forecastTrend.status}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl">
+                  <span className="text-[10px] font-black text-slate-800 dark:text-white block uppercase leading-snug">{forecastTrend.trendLabel}</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{forecastTrend.statusDesc}</p>
+                </div>
+
+                <div className="flex justify-between items-center text-[10px] font-bold bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl">
+                  <span className="text-slate-500 uppercase">Shield Success chance:</span>
+                  <span className={`font-black ${forecastTrend.textColor}`}>{forecastTrend.bypassChance}</span>
+                </div>
+
+                <button
+                  type="button"
+                  id="open-vtp-modal-btn"
+                  onClick={() => {
+                    fetchTelemetryAnalysis();
+                    setShowTornadogenesisModal(true);
+                  }}
+                  className="w-full py-2.5 px-4 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 hover:border-cyan-400 dark:hover:border-neon-aqua hover:text-cyan-600 dark:hover:text-neon-aqua text-slate-800 dark:text-slate-200 font-black uppercase text-[10px] tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Flame className="w-4 h-4 text-orange-500 animate-pulse" />
+                  <span>Genesis probability core</span>
+                </button>
+              </div>
+            </section>
+
+            {/* Active Proximity Alerts */}
+            <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm">
+              <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800/80 pb-3 mb-4">
+                <h2 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <Radio className="w-4.5 h-4.5 text-rose-500 dark:text-neon-pink animate-pulse" />
+                  Proximity Alert Board
+                </h2>
+                {alerts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHeadedTowardsOnly(p => !p)}
+                    className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-colors ${
+                      showHeadedTowardsOnly
+                        ? 'bg-rose-500/10 border-rose-500 text-rose-500'
+                        : 'border-slate-200 dark:border-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {showHeadedTowardsOnly ? 'Headed Only' : 'All Alerts'}
+                  </button>
+                )}
+              </div>
+
+              {alerts.length === 0 ? (
+                <div className="bg-slate-50 dark:bg-slate-950/20 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center">
+                  <ShieldCheck className="w-10 h-10 text-teal-600 dark:text-neon-aqua mx-auto mb-2 animate-pulse" />
+                  <h3 className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-wider">System Clear</h3>
+                  <p className="text-[10px] text-slate-500 leading-relaxed mt-1">No active convective warning polygons intersecting tracking grids.</p>
+                </div>
+              ) : (
+                (() => {
+                  const displayedAlerts = showHeadedTowardsOnly
+                    ? alerts.filter((alert: any) => alert.headedTowards || alert.isDirectHit)
+                    : alerts;
+
+                  if (displayedAlerts.length === 0) {
+                    return (
+                      <div className="text-center p-6 bg-slate-50 dark:bg-slate-950/20 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                        <p className="text-[10px] text-slate-500 uppercase font-black tracking-wide">No alerts directly in your path.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4 max-h-[360px] overflow-y-auto pr-1">
+                      {displayedAlerts.map((alert: any) => (
+                        <ThreatCard
+                          key={alert.id}
+                          alert={alert}
+                          hasAssets={assets.length > 0}
+                          onViewTrajectory={handleFocusTrajectory}
+                          userMaskActive={settings.userMaskActive}
+                        />
+                      ))}
+                    </div>
+                  );
+                })()
+              )}
+            </section>
+
+            {/* SPC Convective Discussions */}
+            <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm">
+              <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-800/80 pb-3 mb-4">
+                <h3 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-wider">
+                  SPC Discussions
+                </h3>
+                <button
+                  onClick={() => setShowMDInputForm(!showMDInputForm)}
+                  className="text-[9px] font-black uppercase text-amber-500 hover:text-amber-400 transition-colors"
+                >
+                  {showMDInputForm ? 'Close Panel' : 'Feed Text'}
+                </button>
+              </div>
+
+              {showMDInputForm && (
+                <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl mb-4">
+                  <textarea
+                    id="newMDText"
+                    name="newMDText"
+                    value={newMDText}
+                    onChange={(e) => setNewMDText(e.target.value)}
+                    placeholder="Paste raw SPC MD text..."
+                    rows={4}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[10px] p-2 rounded-lg outline-none font-mono focus:border-amber-500"
+                  />
+                  <button
+                    onClick={() => {
+                      handleAddCustomMD(newMDText);
+                      setNewMDText('');
+                      setShowMDInputForm(false);
+                    }}
+                    className="w-full mt-2 py-1.5 bg-amber-500 text-slate-950 text-[9px] font-black uppercase tracking-wider rounded-lg"
+                  >
+                    Parse Discussion
+                  </button>
+                </div>
+              )}
+
+              {discussions.length === 0 ? (
+                <div className="p-4 text-center text-[10px] text-slate-500 uppercase tracking-widest font-mono">
+                  Loading SPC Forecast tracks...
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                  {discussions.map((md: any) => {
+                    const isExpanded = expandedMDId === md.id;
+                    const isIntersecting = md.isIntersecting;
+                    return (
+                      <div key={md.id} className={`p-3.5 border rounded-2xl bg-slate-50 dark:bg-slate-950/40 hover:border-slate-350 dark:hover:border-slate-800 transition ${isIntersecting ? 'border-amber-500' : 'border-slate-200 dark:border-slate-800/80'}`}>
+                        <div className="flex justify-between items-start gap-2.5">
+                          <span className="px-1.5 py-0.5 bg-amber-500 text-slate-950 text-[8px] font-black uppercase rounded shrink-0">
+                            #MCD {md.number}
+                          </span>
+                          <span className="text-[10px] font-black text-slate-800 dark:text-white truncate">
+                            {md.areasAffected}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2 font-medium leading-relaxed line-clamp-3">
+                          {md.summary}
+                        </p>
+                        <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-200/50 dark:border-slate-800/50">
+                          <span className="text-[9px] font-mono text-slate-400">
+                            Watch Prob: <strong className="text-slate-800 dark:text-white">{md.probability}%</strong>
+                          </span>
+                          <button
+                            onClick={() => handleFocusMD(md)}
+                            className="text-[8px] font-black uppercase text-cyan-600 dark:text-neon-aqua hover:underline"
+                          >
+                            Locate Corridor
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -5199,6 +5590,135 @@ export default function CapeHistoryChart({ history, currentCape, loading }: Cape
             <span className="font-bold text-slate-600 dark:text-slate-300">&gt; 2500 J/kg</span>
             <span className="text-rose-500/90 font-bold">Explosive storm updrafts probable</span>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+================================================================================
+FILE: src/components/ErrorBoundary.tsx
+================================================================================
+import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { useRouteError, useNavigate } from 'react-router';
+import { AlertOctagon, RefreshCw, Home, Terminal } from 'lucide-react';
+
+interface Props {
+  children?: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+  error: Error | null;
+}
+
+export class ErrorBoundary extends React.Component<Props, State> {
+  props: Props;
+  state: State;
+
+  constructor(props: Props) {
+    super(props);
+    this.props = props;
+    this.state = {
+      hasError: false,
+      error: null
+    };
+  }
+
+  public static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error };
+  }
+
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('ErrorBoundary caught an unhandled exception:', error, errorInfo);
+  }
+
+  public render() {
+    if (this.state.hasError) {
+      return <ErrorFallbackPage error={this.state.error} resetError={() => (this as any).setState({ hasError: false, error: null })} />;
+    }
+
+    return this.props.children;
+  }
+}
+
+export function RouteErrorElement() {
+  const error = useRouteError() as any;
+  const navigate = useNavigate();
+
+  return (
+    <ErrorFallbackPage
+      error={error instanceof Error ? error : new Error(error?.message || error?.statusText || JSON.stringify(error))}
+      resetError={() => navigate('/', { replace: true })}
+    />
+  );
+}
+
+interface FallbackProps {
+  error: Error | null;
+  resetError: () => void;
+}
+
+function ErrorFallbackPage({ error, resetError }: FallbackProps) {
+  const [showDetails, setShowDetails] = React.useState(false);
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-white font-sans relative">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:40px_40px] opacity-10 pointer-events-none"></div>
+      
+      <div className="max-w-xl w-full bg-slate-900/60 backdrop-blur-md border border-red-500/30 rounded-3xl p-8 shadow-[0_10px_40px_rgba(239,68,68,0.15)] relative z-10 text-center">
+        <div className="w-20 h-20 bg-rose-500/10 border-2 border-rose-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+          <AlertOctagon className="w-10 h-10 text-rose-500" />
+        </div>
+
+        <h1 className="text-3xl font-black uppercase tracking-tight text-rose-500 mb-2">
+          Telemetry Failure
+        </h1>
+        <p className="text-slate-400 text-xs font-mono tracking-widest uppercase mb-4">
+          Atmospheric Tracking Interrupt
+        </p>
+
+        <p className="text-slate-300 font-medium text-sm leading-relaxed mb-6">
+          An unexpected error was encountered in the telemetry rendering pipelines. Active monitoring was paused to prevent corrupted tracking telemetry.
+        </p>
+
+        <div className="flex flex-col sm:flex-row justify-center gap-4 mb-6">
+          <button
+            onClick={() => {
+              resetError();
+              window.location.reload();
+            }}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-rose-900/30"
+          >
+            <RefreshCw className="w-4 h-4" /> Restart System
+          </button>
+          
+          <button
+            onClick={() => {
+              resetError();
+              window.location.href = '/';
+            }}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 border border-slate-700 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer"
+          >
+            <Home className="w-4 h-4" /> Return Home
+          </button>
+        </div>
+
+        <div className="border-t border-slate-800/80 pt-4 text-left">
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-400 transition-colors font-mono cursor-pointer mx-auto"
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            {showDetails ? 'Hide Diagnostics' : 'Show Diagnostics'}
+          </button>
+
+          {showDetails && (
+            <div className="mt-4 p-4 bg-slate-950/80 border border-slate-800/80 rounded-xl text-[10px] font-mono text-rose-400 overflow-x-auto max-h-40 leading-relaxed uppercase tracking-wider select-all">
+              {error?.stack || error?.message || 'Unknown execution trace.'}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -8353,32 +8873,13 @@ FILE: src/router.tsx
 import React from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import App from './App';
-import MapView from './routes/MapView';
-import AlertsView from './routes/AlertsView';
-import TelemetryView from './routes/TelemetryView';
+import { RouteErrorElement } from './components/ErrorBoundary';
 
 const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
-    children: [
-      {
-        index: true,
-        element: <Navigate to="/map" replace />
-      },
-      {
-        path: 'map',
-        element: <MapView />
-      },
-      {
-        path: 'alerts',
-        element: <AlertsView />
-      },
-      {
-        path: 'telemetry',
-        element: <TelemetryView />
-      }
-    ]
+    errorElement: <RouteErrorElement />
   }
 ]);
 
@@ -9251,6 +9752,14 @@ export interface NetworkRequestLog {
 ================================================================================
 FILE: src/utils/geoUtils.ts
 ================================================================================
+import {
+  point,
+  polygon as turfPolygon,
+  lineString,
+  nearestPointOnLine,
+  booleanPointInPolygon,
+} from '@turf/turf';
+
 export function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3958.8; // Radius of Earth in miles
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -9297,75 +9806,112 @@ export const cardinalBearings: Record<string, number> = {
   NNW: 337.5,
 };
 
-function isLeft(x1: number, y1: number, x2: number, y2: number, px: number, py: number): number {
-  return (x2 - x1) * (py - y1) - (px - x1) * (y2 - y1);
-}
-
-export function isPointInPolygon(lat: number, lon: number, polygon: [number, number][]): boolean {
-  if (!polygon || polygon.length < 3) return false;
-  let wn = 0; // Winding number counter
-
-  for (let i = 0; i < polygon.length; i++) {
-    const nextIdx = (i + 1) % polygon.length;
-    const x1 = polygon[i][0]; // lon
-    const y1 = polygon[i][1]; // lat
-    const x2 = polygon[nextIdx][0]; // lon
-    const y2 = polygon[nextIdx][1]; // lat
-
-    if (y1 <= lat) {
-      if (y2 > lat) { // Upward crossing
-        if (isLeft(x1, y1, x2, y2, lon, lat) > 0) {
-          wn++;
-        }
-      }
-    } else {
-      if (y2 <= lat) { // Downward crossing
-        if (isLeft(x1, y1, x2, y2, lon, lat) < 0) {
-          wn--;
-        }
-      }
-    }
+/**
+ * Checks if a lat/lon point is inside a GeoJSON-style polygon ring ([lon, lat][] coords).
+ * Uses turf's booleanPointInPolygon for robust multi-polygon and hole support.
+ */
+export function isPointInPolygon(lat: number, lon: number, polygonRing: [number, number][]): boolean {
+  if (!polygonRing || polygonRing.length < 3) return false;
+  try {
+    // Turf polygons need a closed ring (first == last point)
+    const ring = polygonRing[0][0] === polygonRing[polygonRing.length - 1][0] &&
+                 polygonRing[0][1] === polygonRing[polygonRing.length - 1][1]
+      ? polygonRing
+      : [...polygonRing, polygonRing[0]];
+    const pt = point([lon, lat]);
+    const poly = turfPolygon([ring]);
+    return booleanPointInPolygon(pt, poly);
+  } catch {
+    return false;
   }
-  return wn !== 0;
 }
 
+/**
+ * Finds the minimum distance (in miles) from a lat/lon asset to the nearest
+ * edge of a NWS GeoJSON geometry (Polygon or MultiPolygon).
+ * Uses turf's nearestPointOnLine for true geodesic edge proximity,
+ * and booleanPointInPolygon for inside-check.
+ */
 export function getMinPolygonDistance(
   assetLat: number,
   assetLon: number,
   geometryCoordinates: any
 ): { minDist: number; closestPt: [number, number] | null; isInside: boolean } {
+  const assetPt = point([assetLon, assetLat]);
   let minDist = 9999;
   let closestPt: [number, number] | null = null;
   let isInside = false;
 
-  function traverse(arr: any) {
-    if (!Array.isArray(arr)) return;
+  // Extract all rings (handles both Polygon and MultiPolygon coordinate structures)
+  function processRings(rings: any[][]) {
+    for (const ring of rings) {
+      if (!Array.isArray(ring) || ring.length < 3) continue;
+      const coords: [number, number][] = ring.map((pt: any) => [pt[0], pt[1]] as [number, number]);
+      // Ensure ring is closed
+      const closed = coords[0][0] === coords[coords.length - 1][0] &&
+                     coords[0][1] === coords[coords.length - 1][1]
+        ? coords
+        : [...coords, coords[0]];
 
-    if (
-      arr.length >= 2 &&
-      typeof arr[0] === 'number' &&
-      typeof arr[1] === 'number'
-    ) {
-      // longitude is index 0, latitude is index 1
-      const d = getDistance(assetLat, assetLon, arr[1], arr[0]);
-      if (d < minDist) {
-        minDist = d;
-        closestPt = [arr[0], arr[1]];
-      }
-    } else {
-      if (Array.isArray(arr[0]) && typeof arr[0][0] === 'number') {
-        const ring: [number, number][] = arr.map((pt: any) => [pt[0], pt[1]]);
-        if (isPointInPolygon(assetLat, assetLon, ring)) {
+      // Check inside
+      try {
+        const poly = turfPolygon([closed]);
+        if (!isInside && booleanPointInPolygon(assetPt, poly)) {
           isInside = true;
         }
-      }
-      for (let i = 0; i < arr.length; i++) {
-        traverse(arr[i]);
+      } catch { /* malformed ring, skip */ }
+
+      // Measure true edge distance using nearestPointOnLine
+      try {
+        const line = lineString(closed);
+        const nearest = nearestPointOnLine(line, assetPt, { units: 'miles' });
+        const d = nearest.properties.dist ?? 9999;
+        if (d < minDist) {
+          minDist = d;
+          const [lon, lat] = nearest.geometry.coordinates;
+          closestPt = [lon, lat];
+        }
+      } catch { /* malformed coords, fall back to vertex scan */
+        for (const coord of coords) {
+          const d = getDistance(assetLat, assetLon, coord[1], coord[0]);
+          if (d < minDist) {
+            minDist = d;
+            closestPt = [coord[0], coord[1]];
+          }
+        }
       }
     }
   }
 
-  traverse(geometryCoordinates);
+  if (!Array.isArray(geometryCoordinates) || geometryCoordinates.length === 0) {
+    return { minDist, closestPt, isInside };
+  }
+
+  // Detect Polygon vs MultiPolygon by depth
+  const firstEl = geometryCoordinates[0];
+  if (Array.isArray(firstEl) && Array.isArray(firstEl[0]) && typeof firstEl[0][0] === 'number') {
+    // Polygon: [ [ [lon,lat], ... ] ]
+    processRings(geometryCoordinates);
+  } else if (Array.isArray(firstEl) && Array.isArray(firstEl[0]) && Array.isArray(firstEl[0][0])) {
+    // MultiPolygon: [ [ [ [lon,lat], ... ] ], ... ]
+    for (const polygonRings of geometryCoordinates) {
+      processRings(polygonRings);
+    }
+  } else {
+    // Unknown depth — try generic vertex scan as fallback
+    function traverse(arr: any) {
+      if (!Array.isArray(arr)) return;
+      if (arr.length >= 2 && typeof arr[0] === 'number' && typeof arr[1] === 'number') {
+        const d = getDistance(assetLat, assetLon, arr[1], arr[0]);
+        if (d < minDist) { minDist = d; closestPt = [arr[0], arr[1]]; }
+      } else {
+        for (const child of arr) traverse(child);
+      }
+    }
+    traverse(geometryCoordinates);
+  }
+
+  if (isInside) minDist = 0;
   return { minDist, closestPt, isInside };
 }
 
@@ -9544,31 +10090,22 @@ export function parseSPCLatLon(text: string): { lat: number; lon: number }[] {
 
 export function isPointInParsedPolygon(lat: number, lon: number, polygon: { lat: number; lon: number }[]): boolean {
   if (!polygon || polygon.length < 3) return false;
-  let wn = 0; // Winding number counter
-
-  for (let i = 0; i < polygon.length; i++) {
-    const nextIdx = (i + 1) % polygon.length;
-    const x1 = polygon[i].lon;
-    const y1 = polygon[i].lat;
-    const x2 = polygon[nextIdx].lon;
-    const y2 = polygon[nextIdx].lat;
-
-    if (y1 <= lat) {
-      if (y2 > lat) { // Upward crossing
-        if (isLeft(x1, y1, x2, y2, lon, lat) > 0) {
-          wn++;
-        }
-      }
-    } else {
-      if (y2 <= lat) { // Downward crossing
-        if (isLeft(x1, y1, x2, y2, lon, lat) < 0) {
-          wn--;
-        }
-      }
-    }
+  try {
+    // Convert { lat, lon }[] to GeoJSON [lon, lat][] for turf
+    const coords: [number, number][] = polygon.map(p => [p.lon, p.lat]);
+    // Ensure closed ring
+    const closed: [number, number][] = coords[0][0] === coords[coords.length - 1][0] &&
+                   coords[0][1] === coords[coords.length - 1][1]
+      ? coords
+      : [...coords, coords[0]];
+    const pt = point([lon, lat]);
+    const poly = turfPolygon([closed]);
+    return booleanPointInPolygon(pt, poly);
+  } catch {
+    return false;
   }
-  return wn !== 0;
 }
+
 
 export function getParsedPolygonMinDistance(
   assetLat: number,
@@ -9784,8 +10321,9 @@ export default defineConfig(() => {
       },
     },
     server: {
+      port: 5500,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+      // Do not modifyâ€”file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
