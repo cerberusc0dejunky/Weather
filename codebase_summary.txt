@@ -1,8 +1,8 @@
 ================================================================================
 CODEBASE BUNDLE FOR NOTEBOOKLM
-Generated: 2026-06-26T05:56:57.143Z
+Generated: 2026-06-26T06:01:20.171Z
 Project Root: C:\Users\Quant\Projects\D.A.I.S.Y
-Total Files Compiled: 31
+Total Files Compiled: 30
 ================================================================================
 
 ================================================================================
@@ -11,9 +11,6 @@ DIRECTORY TREE STRUCTURE
 .
 ├── .vscode/
 │   └── settings.json
-├── functions/
-│   └── api/
-│       └── proxy.ts
 ├── public/
 │   └── manifest.json
 ├── scripts/
@@ -56,19 +53,6 @@ DIRECTORY TREE STRUCTURE
 ================================================================================
 FUNCTION CALL HIERARCHY
 ================================================================================
-
-- File: functions/api/proxy.ts
-  - Function/Scope: onRequestPost (Lines 4-74)
-    - Calls: request.json (External/Library)
-    - Calls: JSON.stringify (External/Library)
-    - Calls: ['POST', 'PUT', 'PATCH'].includes (External/Library)
-    - Calls: method.toUpperCase (External/Library)
-    - Calls: fetch (External/Library)
-    - Calls: response.headers.get (External/Library)
-    - Calls: contentType.includes (External/Library)
-    - Calls: response.json (External/Library)
-    - Calls: response.text (External/Library)
-    - Calls: Object.fromEntries (External/Library)
 
 - File: scripts/bundle-codebase.ts
   - Function/Scope: <top-level> (Lines 1-498)
@@ -294,7 +278,7 @@ FUNCTION CALL HIERARCHY
 
 - File: src/App.tsx
   - Function/Scope: parseMesoscaleDiscussion (Lines 53-105)
-    - Calls: text.match (Local)
+    - Calls: text.match (External/Library)
     - Calls: areasMatch[1].indexOf (External/Library)
     - Calls: areasMatch[1].substring(0, endIdx).trim (External/Library)
     - Calls: areasMatch[1].substring (External/Library)
@@ -320,7 +304,7 @@ FUNCTION CALL HIERARCHY
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: pins.push (External/Library)
     - Calls: new Date().toISOString (External/Library)
-  - Function/Scope: App (Lines 176-2426)
+  - Function/Scope: App (Lines 176-2403)
     - Calls: useToast (Imported from src/contexts/ToastContext.tsx)
     - Calls: useStormSiren (Imported from src/hooks/useStormSiren.ts)
     - Calls: useState (Library/external import (react))
@@ -345,9 +329,9 @@ FUNCTION CALL HIERARCHY
     - Calls: new Date().toLocaleTimeString (External/Library)
     - Calls: setNetworkLogs (External/Library)
     - Calls: [newLog, ...prev].slice (External/Library)
+    - Calls: ['POST', 'PUT', 'PATCH'].includes (External/Library)
+    - Calls: (options.method || 'GET').toUpperCase (External/Library)
     - Calls: fetch (External/Library)
-    - Calls: res.text (External/Library)
-    - Calls: res.json (External/Library)
     - Calls: console.error (External/Library)
     - Calls: useNationalAlerts (Imported from src/hooks/useNationalAlerts.ts)
     - Calls: window.addEventListener (External/Library)
@@ -370,8 +354,10 @@ FUNCTION CALL HIERARCHY
     - Calls: res.clone (External/Library)
     - Calls: logNetworkRequest (External/Library)
     - Calls: res.text().catch (External/Library)
+    - Calls: res.text (External/Library)
     - Calls: setWindyPointError (External/Library)
     - Calls: triggerToast (External/Library)
+    - Calls: res.json (External/Library)
     - Calls: Date.now (External/Library)
     - Calls: Math.abs (External/Library)
     - Calls: Math.round (External/Library)
@@ -616,40 +602,34 @@ FUNCTION CALL HIERARCHY
     - Calls: Object.keys (External/Library)
     - Calls: Object.entries(log.headers).map (External/Library)
     - Calls: Object.entries (External/Library)
-  - Function/Scope: json (Lines 349-349)
-    - (No call expressions detected)
-  - Function/Scope: text (Lines 350-350)
-    - Calls: JSON.stringify (External/Library)
-  - Function/Scope: clone (Lines 352-352)
-    - (No call expressions detected)
-  - Function/Scope: listenOnline (Lines 381-381)
+  - Function/Scope: listenOnline (Lines 358-358)
     - Calls: setConnectionOnline (External/Library)
-  - Function/Scope: listenOffline (Lines 382-382)
+  - Function/Scope: listenOffline (Lines 359-359)
     - Calls: setConnectionOnline (External/Library)
-  - Function/Scope: capturePrompt (Lines 393-396)
+  - Function/Scope: capturePrompt (Lines 370-373)
     - Calls: e.preventDefault (External/Library)
     - Calls: setPwaPrompt (External/Library)
-  - Function/Scope: parseTempToF (Lines 569-576)
+  - Function/Scope: parseTempToF (Lines 546-553)
     - Calls: (((val - 273.15) * 9) / 5 + 32).toFixed (External/Library)
     - Calls: ((val * 9) / 5 + 32).toFixed (External/Library)
-  - Function/Scope: parseWindToMph (Lines 578-583)
+  - Function/Scope: parseWindToMph (Lines 555-560)
     - Calls: isNaN (External/Library)
     - Calls: mph.toFixed (External/Library)
-  - Function/Scope: parsePaToInHg (Lines 585-588)
+  - Function/Scope: parsePaToInHg (Lines 562-565)
     - Calls: (val * 0.0002953).toFixed (External/Library)
-  - Function/Scope: cToF (Lines 854-857)
+  - Function/Scope: cToF (Lines 831-834)
     - Calls: ((val * 9) / 5 + 32).toFixed (External/Library)
-  - Function/Scope: mpsToMph (Lines 859-864)
+  - Function/Scope: mpsToMph (Lines 836-841)
     - Calls: isNaN (External/Library)
     - Calls: mph.toFixed (External/Library)
-  - Function/Scope: paToInHg (Lines 866-869)
+  - Function/Scope: paToInHg (Lines 843-846)
     - Calls: (val * 0.0002953).toFixed (External/Library)
-  - Function/Scope: checkExpiredAlerts (Lines 1046-1057)
+  - Function/Scope: checkExpiredAlerts (Lines 1023-1034)
     - Calls: setAlerts (External/Library)
     - Calls: prevAlerts.filter (External/Library)
     - Calls: addAlertsToHistoryRef.current (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleAddNewPin (Lines 1160-1205)
+  - Function/Scope: handleAddNewPin (Lines 1137-1182)
     - Calls: searchQuery.trim (External/Library)
     - Calls: setSearching (External/Library)
     - Calls: encodeURIComponent (External/Library)
@@ -667,10 +647,10 @@ FUNCTION CALL HIERARCHY
     - Calls: fetchTelemetryRef.current (External/Library)
     - Calls: triggerToast (External/Library)
     - Calls: console.error (External/Library)
-  - Function/Scope: handleRemovePin (Lines 1207-1209)
+  - Function/Scope: handleRemovePin (Lines 1184-1186)
     - Calls: setAssets (External/Library)
     - Calls: prev.filter (External/Library)
-  - Function/Scope: handleAddCustomMD (Lines 1211-1220)
+  - Function/Scope: handleAddCustomMD (Lines 1188-1197)
     - Calls: inputText.trim (External/Library)
     - Calls: parseMesoscaleDiscussion (Local)
     - Calls: Date.now (External/Library)
@@ -678,7 +658,7 @@ FUNCTION CALL HIERARCHY
     - Calls: setCustomMDs (External/Library)
     - Calls: console.warn (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleArmActivation (Lines 1223-1294)
+  - Function/Scope: handleArmActivation (Lines 1200-1271)
     - Calls: setIsActivating (External/Library)
     - Calls: setLocationError (External/Library)
     - Calls: navigator.geolocation.getCurrentPosition (External/Library)
@@ -694,39 +674,39 @@ FUNCTION CALL HIERARCHY
     - Calls: setShowTermsModal (External/Library)
     - Calls: triggerToast (External/Library)
     - Calls: console.warn (External/Library)
-  - Function/Scope: handleLocationAccept (Lines 1296-1298)
+  - Function/Scope: handleLocationAccept (Lines 1273-1275)
     - Calls: handleArmActivation (Local)
-  - Function/Scope: handleLocationDecline (Lines 1300-1304)
+  - Function/Scope: handleLocationDecline (Lines 1277-1281)
     - Calls: setIsActivating (External/Library)
     - Calls: setLocationError (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleClearAlertHistory (Lines 1306-1309)
+  - Function/Scope: handleClearAlertHistory (Lines 1283-1286)
     - Calls: setAlertHistory (External/Library)
     - Calls: localStorage.removeItem (External/Library)
-  - Function/Scope: handleRemoveAlertHistoryItem (Lines 1311-1317)
+  - Function/Scope: handleRemoveAlertHistoryItem (Lines 1288-1294)
     - Calls: setAlertHistory (External/Library)
     - Calls: prev.filter (External/Library)
     - Calls: localStorage.setItem (External/Library)
     - Calls: JSON.stringify (External/Library)
-  - Function/Scope: handleTestSiren (Lines 1320-1323)
+  - Function/Scope: handleTestSiren (Lines 1297-1300)
     - Calls: playSiren (External/Library)
     - Calls: setTimeout (External/Library)
     - Calls: stopSiren (External/Library)
-  - Function/Scope: handleShareApp (Lines 1326-1342)
+  - Function/Scope: handleShareApp (Lines 1303-1319)
     - Calls: navigator.share (External/Library)
     - Calls: navigator.clipboard.writeText (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handlePwaInstall (Lines 1345-1354)
+  - Function/Scope: handlePwaInstall (Lines 1322-1331)
     - Calls: pwaPrompt.prompt (External/Library)
     - Calls: pwaPrompt.userChoice.then (External/Library)
     - Calls: setPwaPrompt (External/Library)
-  - Function/Scope: handleFocusTrajectory (Lines 1357-1370)
+  - Function/Scope: handleFocusTrajectory (Lines 1334-1347)
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: setCurrentLat (External/Library)
     - Calls: setCurrentLon (External/Library)
     - Calls: setMapMode (External/Library)
     - Calls: console.warn (External/Library)
-  - Function/Scope: handleFocusMD (Lines 1372-1383)
+  - Function/Scope: handleFocusMD (Lines 1349-1360)
     - Calls: md.coordinates.map (External/Library)
     - Calls: lats.reduce (External/Library)
     - Calls: lons.reduce (External/Library)
@@ -1495,85 +1475,6 @@ FILE: .vscode/settings.json
 {
   "css.lint.unknownAtRules": "ignore"
 }
-
-================================================================================
-FILE: functions/api/proxy.ts
-================================================================================
-// Cloudflare Pages Function — CORS proxy for NWS and Windy API requests
-// Replaces the Express app.post('/api/proxy') route from server.ts
-
-export async function onRequestPost(context: any) {
-  try {
-    const { request } = context;
-    const reqBody = await request.json();
-    const { url, method = 'GET', headers = {}, body = null } = reqBody;
-
-    if (!url) {
-      return new Response(JSON.stringify({ error: 'URL is required' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    const fetchOptions: any = {
-      method,
-      headers: {
-        ...headers,
-      },
-    };
-
-    // Default server User-Agent for NWS (required by api.weather.gov)
-    if (!fetchOptions.headers['User-Agent']) {
-      fetchOptions.headers['User-Agent'] = '(DAISY Storm Tracker App Server, cerberus@c0dejunky.com)';
-    }
-
-    if (body && ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
-      fetchOptions.body = JSON.stringify(body);
-      if (!fetchOptions.headers['Content-Type']) {
-        fetchOptions.headers['Content-Type'] = 'application/json';
-      }
-    }
-
-    const response = await fetch(url, fetchOptions);
-    const contentType = response.headers.get('content-type');
-    let responseData;
-
-    if (contentType && contentType.includes('json')) {
-      responseData = await response.json();
-    } else {
-      responseData = await response.text();
-    }
-
-    if (response.ok) {
-      const payload = {
-        status: response.status,
-        headers: Object.fromEntries(response.headers),
-        data: responseData,
-      };
-      return new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } else {
-      return new Response(
-        JSON.stringify({ status: response.status, error: responseData }),
-        {
-          status: response.status,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
-    }
-  } catch (error: any) {
-    return new Response(
-      JSON.stringify({ error: error.message || 'Internal proxy error' }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
-}
-
 
 ================================================================================
 FILE: index.html
@@ -2849,48 +2750,25 @@ export default function App() {
   // Potential rotation pins state derived from active alerts
   const [rotationPins, setRotationPins] = useState<RotationPin[]>([]);
 
-  // Telemetry caching proxy wrapper
+  // Direct fetch wrapper — fully serverless, no proxy needed
   const proxyFetch = useCallback(async (url: string, options: any = {}) => {
     try {
-      let parsedBody = null;
-      if (options.body) {
-        try {
-          parsedBody = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
-        } catch (e) {
-          parsedBody = options.body;
+      const fetchOptions: RequestInit = {
+        method: options.method || 'GET',
+        headers: { ...(options.headers || {}) },
+      };
+
+      if (options.body && ['POST', 'PUT', 'PATCH'].includes((options.method || 'GET').toUpperCase())) {
+        fetchOptions.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
+        if (!(fetchOptions.headers as Record<string, string>)['Content-Type']) {
+          (fetchOptions.headers as Record<string, string>)['Content-Type'] = 'application/json';
         }
       }
 
-      const res = await fetch('/api/proxy', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          url,
-          method: options.method || 'GET',
-          headers: options.headers || {},
-          body: parsedBody,
-          cacheTtl: 60000 // 1 min cache
-        })
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Proxy error: ${res.status} ${errText}`);
-      }
-      const json = await res.json();
-      
-      return {
-        ok: json.status >= 200 && json.status < 300,
-        status: json.status,
-        statusText: json.status >= 200 && json.status < 300 ? 'OK' : 'Error',
-        json: async () => json.data,
-        text: async () => typeof json.data === 'string' ? json.data : JSON.stringify(json.data),
-        headers: new Headers(json.headers || {}),
-        clone: function() { return this; }
-      } as any;
+      const response = await fetch(url, fetchOptions);
+      return response;
     } catch (e) {
-      console.error('[Proxy Fetch Error for ' + url + ']', e);
+      console.error('[Direct Fetch Error for ' + url + ']', e);
       throw e;
     }
   }, []);

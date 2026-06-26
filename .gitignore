@@ -41,3 +41,4 @@ Thumbs.db
 # Project-specific generated outputs
 /codebase_summary.txt
 .gemini/
+/scripts
