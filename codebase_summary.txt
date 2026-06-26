@@ -1,6 +1,6 @@
 ================================================================================
 CODEBASE BUNDLE FOR NOTEBOOKLM
-Generated: 2026-06-26T06:56:12.694Z
+Generated: 2026-06-26T07:43:19.798Z
 Project Root: C:\Users\Quant\Projects\D.A.I.S.Y
 Total Files Compiled: 31
 ================================================================================
@@ -812,7 +812,7 @@ FUNCTION CALL HIERARCHY
     - Calls: payload[0].value.toFixed (External/Library)
 
 - File: src/components/RadarMap.tsx
-  - Function/Scope: <top-level> (Lines 1-1528)
+  - Function/Scope: <top-level> (Lines 1-1532)
     - Calls: memo (Library/external import (react))
   - Function/Scope: getDegreesFromDirection (Lines 8-56)
     - Calls: dirStr.trim().toUpperCase (External/Library)
@@ -825,7 +825,7 @@ FUNCTION CALL HIERARCHY
     - Calls: Math.sin (External/Library)
     - Calls: Math.cos (External/Library)
     - Calls: Math.atan2 (External/Library)
-  - Function/Scope: RadarMapComponent (Lines 137-1510)
+  - Function/Scope: RadarMapComponent (Lines 137-1514)
     - Calls: useState (Library/external import (react))
     - Calls: useRef (Library/external import (react))
     - Calls: useWindyFailsafe (Imported from src/utils/useWindyFailsafe.ts)
@@ -881,12 +881,12 @@ FUNCTION CALL HIERARCHY
     - Calls: onSetCoordinates (External/Library)
     - Calls: setTimeout (External/Library)
     - Calls: console.error (External/Library)
-  - Function/Scope: cleanupInteractiveElements (Lines 383-441)
+  - Function/Scope: cleanupInteractiveElements (Lines 386-444)
     - Calls: map.removeLayer (External/Library)
     - Calls: polygonLayersRef.current.forEach (External/Library)
     - Calls: assetMarkersRef.current.forEach (External/Library)
     - Calls: alertMarkersRef.current.forEach (External/Library)
-  - Function/Scope: updateInteractiveElements (Lines 443-1079)
+  - Function/Scope: updateInteractiveElements (Lines 446-1082)
     - Calls: cleanupInteractiveElements (Local)
     - Calls: map.off (External/Library)
     - Calls: map.on (External/Library)
@@ -1121,7 +1121,7 @@ FUNCTION CALL HIERARCHY
             fillOpacity: spot.intensity * 0.08,
             interactive: false,
           }).addTo (External/Library)
-  - Function/Scope: renderSvgFallback (Lines 1082-1165)
+  - Function/Scope: renderSvgFallback (Lines 1085-1168)
     - Calls: userLat.toFixed (External/Library)
     - Calls: userLon.toFixed (External/Library)
     - Calls: assets.slice(0, 2).map (External/Library)
@@ -6160,7 +6160,8 @@ export function RadarMapComponent({
         windyStoreRef.current = store;
 
         // Sync initial map overlay mode
-        store.set('overlay', mapMode);
+        const initialOverlay = mapMode === 'radar' ? 'rain' : mapMode;
+        store.set('overlay', initialOverlay);
 
         lastSetCoordinatesRef.current = { lat: userLat, lon: userLon };
 
@@ -6182,9 +6183,11 @@ export function RadarMapComponent({
     console.log(`[RadarMap Monitor] mapMode state transition triggered. Target mode: "${mapMode}"`);
     if (windyStoreRef.current) {
       try {
-        windyStoreRef.current.set('overlay', mapMode);
+        // Map 'radar' to Windy's supported 'rain' overlay parameter to prevent console exceptions
+        const windyOverlayVal = mapMode === 'radar' ? 'rain' : mapMode;
+        windyStoreRef.current.set('overlay', windyOverlayVal);
         const currentOverlayValue = windyStoreRef.current.get('overlay');
-        console.log(`[RadarMap Monitor - Windy Live Sync] Method call 'store.set("overlay", "${mapMode}")' executed. Active Windy overlay store value is currently verified as: "${currentOverlayValue}"`);
+        console.log(`[RadarMap Monitor - Windy Live Sync] Method call 'store.set("overlay", "${windyOverlayVal}")' executed. Active Windy overlay store value is currently verified as: "${currentOverlayValue}"`);
       } catch (err) {
         console.error(`[RadarMap Monitor - Windy Live Sync Error] API method call execution failed for mode "${mapMode}":`, err);
       }
@@ -7181,6 +7184,7 @@ export function RadarMapComponent({
             <Search className="w-3.5 h-3.5 text-cyan-400 mr-2 shrink-0 animate-pulse" />
             <input
               type="text"
+              id="hud-radar-search-input"
               value={addressSearchQuery}
               onChange={(e) => setAddressSearchQuery(e.target.value)}
               placeholder="Search location/radar..."

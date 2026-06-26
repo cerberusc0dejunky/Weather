@@ -285,7 +285,8 @@ export function RadarMapComponent({
         windyStoreRef.current = store;
 
         // Sync initial map overlay mode
-        store.set('overlay', mapMode);
+        const initialOverlay = mapMode === 'radar' ? 'rain' : mapMode;
+        store.set('overlay', initialOverlay);
 
         lastSetCoordinatesRef.current = { lat: userLat, lon: userLon };
 
@@ -307,9 +308,11 @@ export function RadarMapComponent({
     console.log(`[RadarMap Monitor] mapMode state transition triggered. Target mode: "${mapMode}"`);
     if (windyStoreRef.current) {
       try {
-        windyStoreRef.current.set('overlay', mapMode);
+        // Map 'radar' to Windy's supported 'rain' overlay parameter to prevent console exceptions
+        const windyOverlayVal = mapMode === 'radar' ? 'rain' : mapMode;
+        windyStoreRef.current.set('overlay', windyOverlayVal);
         const currentOverlayValue = windyStoreRef.current.get('overlay');
-        console.log(`[RadarMap Monitor - Windy Live Sync] Method call 'store.set("overlay", "${mapMode}")' executed. Active Windy overlay store value is currently verified as: "${currentOverlayValue}"`);
+        console.log(`[RadarMap Monitor - Windy Live Sync] Method call 'store.set("overlay", "${windyOverlayVal}")' executed. Active Windy overlay store value is currently verified as: "${currentOverlayValue}"`);
       } catch (err) {
         console.error(`[RadarMap Monitor - Windy Live Sync Error] API method call execution failed for mode "${mapMode}":`, err);
       }
