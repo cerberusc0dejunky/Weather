@@ -1,8 +1,8 @@
 ================================================================================
 CODEBASE BUNDLE FOR NOTEBOOKLM
-Generated: 2026-06-26T05:48:04.198Z
+Generated: 2026-06-26T05:56:57.143Z
 Project Root: C:\Users\Quant\Projects\D.A.I.S.Y
-Total Files Compiled: 30
+Total Files Compiled: 31
 ================================================================================
 
 ================================================================================
@@ -11,6 +11,9 @@ DIRECTORY TREE STRUCTURE
 .
 ├── .vscode/
 │   └── settings.json
+├── functions/
+│   └── api/
+│       └── proxy.ts
 ├── public/
 │   └── manifest.json
 ├── scripts/
@@ -53,6 +56,19 @@ DIRECTORY TREE STRUCTURE
 ================================================================================
 FUNCTION CALL HIERARCHY
 ================================================================================
+
+- File: functions/api/proxy.ts
+  - Function/Scope: onRequestPost (Lines 4-74)
+    - Calls: request.json (External/Library)
+    - Calls: JSON.stringify (External/Library)
+    - Calls: ['POST', 'PUT', 'PATCH'].includes (External/Library)
+    - Calls: method.toUpperCase (External/Library)
+    - Calls: fetch (External/Library)
+    - Calls: response.headers.get (External/Library)
+    - Calls: contentType.includes (External/Library)
+    - Calls: response.json (External/Library)
+    - Calls: response.text (External/Library)
+    - Calls: Object.fromEntries (External/Library)
 
 - File: scripts/bundle-codebase.ts
   - Function/Scope: <top-level> (Lines 1-498)
@@ -304,7 +320,7 @@ FUNCTION CALL HIERARCHY
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: pins.push (External/Library)
     - Calls: new Date().toISOString (External/Library)
-  - Function/Scope: App (Lines 176-2437)
+  - Function/Scope: App (Lines 176-2426)
     - Calls: useToast (Imported from src/contexts/ToastContext.tsx)
     - Calls: useStormSiren (Imported from src/hooks/useStormSiren.ts)
     - Calls: useState (Library/external import (react))
@@ -590,7 +606,6 @@ FUNCTION CALL HIERARCHY
     - Calls: handleFocusTrajectory (Local)
     - Calls: setTheme (External/Library)
     - Calls: setSettings (External/Library)
-    - Calls: setShowKeysPanel (External/Library)
     - Calls: parseInt (External/Library)
     - Calls: setCustomPointKey (External/Library)
     - Calls: setCustomMapKey (External/Library)
@@ -1482,6 +1497,85 @@ FILE: .vscode/settings.json
 }
 
 ================================================================================
+FILE: functions/api/proxy.ts
+================================================================================
+// Cloudflare Pages Function — CORS proxy for NWS and Windy API requests
+// Replaces the Express app.post('/api/proxy') route from server.ts
+
+export async function onRequestPost(context: any) {
+  try {
+    const { request } = context;
+    const reqBody = await request.json();
+    const { url, method = 'GET', headers = {}, body = null } = reqBody;
+
+    if (!url) {
+      return new Response(JSON.stringify({ error: 'URL is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const fetchOptions: any = {
+      method,
+      headers: {
+        ...headers,
+      },
+    };
+
+    // Default server User-Agent for NWS (required by api.weather.gov)
+    if (!fetchOptions.headers['User-Agent']) {
+      fetchOptions.headers['User-Agent'] = '(DAISY Storm Tracker App Server, cerberus@c0dejunky.com)';
+    }
+
+    if (body && ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
+      fetchOptions.body = JSON.stringify(body);
+      if (!fetchOptions.headers['Content-Type']) {
+        fetchOptions.headers['Content-Type'] = 'application/json';
+      }
+    }
+
+    const response = await fetch(url, fetchOptions);
+    const contentType = response.headers.get('content-type');
+    let responseData;
+
+    if (contentType && contentType.includes('json')) {
+      responseData = await response.json();
+    } else {
+      responseData = await response.text();
+    }
+
+    if (response.ok) {
+      const payload = {
+        status: response.status,
+        headers: Object.fromEntries(response.headers),
+        data: responseData,
+      };
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } else {
+      return new Response(
+        JSON.stringify({ status: response.status, error: responseData }),
+        {
+          status: response.status,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+  } catch (error: any) {
+    return new Response(
+      JSON.stringify({ error: error.message || 'Internal proxy error' }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+}
+
+
+================================================================================
 FILE: index.html
 ================================================================================
 <!doctype html>
@@ -1530,7 +1624,7 @@ FILE: package.json
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
@@ -4566,17 +4660,6 @@ export default function App() {
                   Calm Comfort Mask
                 </span>
               </label>
-
-              <button
-                type="button"
-                id="toggle-keys-panel-btn"
-                onClick={() => setShowKeysPanel(prev => !prev)}
-                className={`px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:border-indigo-500 dark:hover:border-indigo-500 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer font-sans flex items-center justify-center gap-1.5`}
-              >
-                <Key className="w-3.5 h-3.5 text-indigo-500" />
-                {showKeysPanel ? 'Hide API Keys' : 'Manage API Keys'}
-              </button>
-
               <div className="flex items-center gap-3 border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 pt-3 md:pt-0 pl-0 md:pl-5 w-full md:w-auto">
                 <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 select-none shrink-0">
                   <Compass className="w-3.5 h-3.5 text-cyan-500 dark:text-neon-aqua" />
