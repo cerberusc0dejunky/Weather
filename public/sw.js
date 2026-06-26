@@ -44,7 +44,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Bypass dev-server WebSocket connections or hot reload triggers if they leak in
+  // Bypass dev-server WebSocket connections or hmr reload triggers if they leak in
   if (url.pathname.includes('vite') || url.pathname.includes('hmr') || url.pathname.includes('ws')) {
     event.respondWith(fetch(event.request));
     return;
