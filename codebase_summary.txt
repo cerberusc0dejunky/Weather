@@ -1,6 +1,6 @@
 ================================================================================
 CODEBASE BUNDLE FOR NOTEBOOKLM
-Generated: 2026-06-26T05:30:37.006Z
+Generated: 2026-06-26T05:48:04.198Z
 Project Root: C:\Users\Quant\Projects\D.A.I.S.Y
 Total Files Compiled: 30
 ================================================================================
@@ -1191,7 +1191,7 @@ FUNCTION CALL HIERARCHY
     - Calls: useContext (Library/external import (react))
 
 - File: src/hooks/useNationalAlerts.ts
-  - Function/Scope: useNationalAlerts (Lines 36-401)
+  - Function/Scope: useNationalAlerts (Lines 35-400)
     - Calls: useState (Library/external import (react))
     - Calls: useRef (Library/external import (react))
     - Calls: useCallback (Library/external import (react))
@@ -1478,7 +1478,7 @@ CODEBASE SOURCE FILES
 FILE: .vscode/settings.json
 ================================================================================
 {
-    "livePreview.defaultPreviewPath": "/index.html"
+  "css.lint.unknownAtRules": "ignore"
 }
 
 ================================================================================
@@ -7601,7 +7601,6 @@ export const useToast = () => {
 FILE: src/hooks/useNationalAlerts.ts
 ================================================================================
 import { useState, useCallback, useRef } from 'react';
-import * as turf from '@turf/turf';
 import { NWSAlert } from '../types';
 import {
   getDistance,
@@ -9798,9 +9797,7 @@ FILE: tsconfig.json
     "allowJs": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./src/*"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
