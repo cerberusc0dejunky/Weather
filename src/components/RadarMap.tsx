@@ -1306,6 +1306,7 @@ export function RadarMapComponent({
             <Search className="w-3.5 h-3.5 text-cyan-400 mr-2 shrink-0 animate-pulse" />
             <input
               type="text"
+              id="hud-radar-search-input"
               value={addressSearchQuery}
               onChange={(e) => setAddressSearchQuery(e.target.value)}
               placeholder="Search location/radar..."
