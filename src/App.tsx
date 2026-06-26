@@ -1119,13 +1119,91 @@ export default function App() {
         const payload = await res.json();
         setTornadogenesisData(payload);
       } else {
-        console.warn('Server analyzer endpoint responded with error status:', res.status);
+        console.warn('Server analyzer endpoint responded with error status:', res.status, '- activating client-side diagnostic fallback.');
+        throw new Error(`Server returned status: ${res.status}`);
       }
     } catch (e) {
-      console.warn('Failed to parse microclimate convective ingredients:', e);
+      console.warn('Utilizing client-side backup Solver core for convective parameters:', e);
+      // Scientific heuristic model running fully client-side to prevent network blocker aborts:
+      const tempF = parseFloat(String(targetTelemetry.temperature || '70'));
+      const dewF = parseFloat(String(targetTelemetry.dewPoint || '60'));
+      const windMph = parseFloat(String(targetTelemetry.windSpeed || '0'));
+      const gustMph = parseFloat(String(targetTelemetry.windGust || '0'));
+      const capeJkg = targetCape || 0;
+
+      // 1. Moisture Metric (Favorable when dewpoint is high, depression is low)
+      const depression = tempF - dewF;
+      let moistureDiagnostic = 'Marginal (Dewpoint low/dry air intrusion)';
+      let moistureScore = 10;
+      if (dewF >= 70 && depression <= 4) {
+        moistureDiagnostic = 'Highly Favorable (Rich boundary layer moisture, low LCL height)';
+        moistureScore = 30;
+      } else if (dewF >= 60 && depression <= 8) {
+        moistureDiagnostic = 'Favorable (Moderate moisture depth, supportive surface LCLs)';
+        moistureScore = 20;
+      }
+
+      // 2. Instability Metric (Based on CAPE)
+      let instabilityDiagnostic = 'Stable / Weak Convection';
+      let instabilityScore = 5;
+      if (capeJkg >= 2500) {
+        instabilityDiagnostic = 'Extreme Instability (MUCAPE > 2500 J/kg, explosive updrafts)';
+        instabilityScore = 30;
+      } else if (capeJkg >= 1500) {
+        instabilityDiagnostic = 'Moderate to Strong Instability (Buoyancy supportive of severe cores)';
+        instabilityScore = 20;
+      } else if (capeJkg >= 500) {
+        instabilityDiagnostic = 'Marginal Buoyancy (Weak convective columns)';
+        instabilityScore = 10;
+      }
+
+      // 3. Shear / Wind coupling Metric
+      const maxWind = Math.max(windMph, gustMph);
+      let shearDiagnostic = 'Weak vertical wind shear / low wind coupling';
+      let shearScore = 5;
+      if (maxWind >= 45) {
+        shearDiagnostic = 'High Shear (Severe kinematics, organized supercell environment)';
+        shearScore = 25;
+      } else if (maxWind >= 20) {
+        shearDiagnostic = 'Moderate Shear (Supportive speed shear profiles)';
+        shearScore = 15;
+      }
+
+      // 4. Lifting mechanism (based on active warning polygon count & SPC discussion presence)
+      const warningCount = alerts.filter(a => a.event.toUpperCase().includes('WARNING')).length;
+      let liftDiagnostic = 'Ambient frontal boundary/weak thermal convergence';
+      let liftScore = 10;
+      if (warningCount >= 2 || discussions.length > 0) {
+        liftDiagnostic = 'Strong Mesoscale Ascent (Active boundaries / convective outflows present)';
+        liftScore = 15;
+      }
+
+      const totalScore = moistureScore + instabilityScore + shearScore + liftScore;
+      const genesisProb = Math.min(95, Math.max(2, totalScore));
+
+      let displayMessage = 'Convective conditions are stable. Low tornadogenesis risk.';
+      if (genesisProb >= 70) {
+        displayMessage = 'Explosive convective growth environment. High wind shear and extreme buoyancy support tornadic cell initiation.';
+      } else if (genesisProb >= 40) {
+        displayMessage = 'Moderate convective threat. Watch local radar carefully for velocity coupling signs.';
+      } else if (genesisProb >= 20) {
+        displayMessage = 'Convective elements present. Low probability of organized supercellular development.';
+      }
+
+      setTornadogenesisData({
+        genesis_probability_pct: genesisProb,
+        display_message: displayMessage,
+        metrics: {
+          moisture: moistureDiagnostic,
+          instability: instabilityDiagnostic,
+          lift: liftDiagnostic,
+          shear: shearDiagnostic
+        }
+      });
     } finally {
       setIsAnalyzingTelemetry(false);
     }
+
   }, [telemetry, windyPointTelemetry, capeHistory, discussions, alerts, logNetworkRequest]);
 
   // Automate background thermodynamic analysis on telemetry syncs

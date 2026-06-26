@@ -1,6 +1,6 @@
 ================================================================================
 CODEBASE BUNDLE FOR NOTEBOOKLM
-Generated: 2026-06-26T06:39:25.654Z
+Generated: 2026-06-26T06:47:44.406Z
 Project Root: C:\Users\Quant\Projects\D.A.I.S.Y
 Total Files Compiled: 31
 ================================================================================
@@ -305,7 +305,7 @@ FUNCTION CALL HIERARCHY
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: pins.push (External/Library)
     - Calls: new Date().toISOString (External/Library)
-  - Function/Scope: App (Lines 178-2718)
+  - Function/Scope: App (Lines 178-2796)
     - Calls: useToast (Imported from src/contexts/ToastContext.tsx)
     - Calls: useStormSiren (Imported from src/hooks/useStormSiren.ts)
     - Calls: useState (Library/external import (react))
@@ -443,6 +443,11 @@ FUNCTION CALL HIERARCHY
     - Calls: discussions.map (External/Library)
     - Calls: alerts.map (External/Library)
     - Calls: setTornadogenesisData (External/Library)
+    - Calls: String (External/Library)
+    - Calls: alerts.filter (External/Library)
+    - Calls: a.event.toUpperCase().includes (External/Library)
+    - Calls: a.event.toUpperCase (External/Library)
+    - Calls: Math.min (External/Library)
     - Calls: fetchTelemetryAnalysis (External/Library)
     - Calls: alerts.some (External/Library)
     - Calls: a.event.includes (External/Library)
@@ -603,7 +608,6 @@ FUNCTION CALL HIERARCHY
     - Calls: Object.keys (External/Library)
     - Calls: Object.entries(log.headers).map (External/Library)
     - Calls: Object.entries (External/Library)
-    - Calls: alerts.filter (External/Library)
     - Calls: setCurrentLat (External/Library)
     - Calls: setCurrentLon (External/Library)
     - Calls: setSearchQuery (External/Library)
@@ -673,7 +677,7 @@ FUNCTION CALL HIERARCHY
     - Calls: prevAlerts.filter (External/Library)
     - Calls: addAlertsToHistoryRef.current (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleAddNewPin (Lines 1139-1184)
+  - Function/Scope: handleAddNewPin (Lines 1217-1262)
     - Calls: searchQuery.trim (External/Library)
     - Calls: setSearching (External/Library)
     - Calls: encodeURIComponent (External/Library)
@@ -691,10 +695,10 @@ FUNCTION CALL HIERARCHY
     - Calls: fetchTelemetryRef.current (External/Library)
     - Calls: triggerToast (External/Library)
     - Calls: console.error (External/Library)
-  - Function/Scope: handleRemovePin (Lines 1186-1188)
+  - Function/Scope: handleRemovePin (Lines 1264-1266)
     - Calls: setAssets (External/Library)
     - Calls: prev.filter (External/Library)
-  - Function/Scope: handleAddCustomMD (Lines 1190-1199)
+  - Function/Scope: handleAddCustomMD (Lines 1268-1277)
     - Calls: inputText.trim (External/Library)
     - Calls: parseMesoscaleDiscussion (Local)
     - Calls: Date.now (External/Library)
@@ -702,7 +706,7 @@ FUNCTION CALL HIERARCHY
     - Calls: setCustomMDs (External/Library)
     - Calls: console.warn (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleArmActivation (Lines 1202-1273)
+  - Function/Scope: handleArmActivation (Lines 1280-1351)
     - Calls: setIsActivating (External/Library)
     - Calls: setLocationError (External/Library)
     - Calls: navigator.geolocation.getCurrentPosition (External/Library)
@@ -718,39 +722,39 @@ FUNCTION CALL HIERARCHY
     - Calls: setShowTermsModal (External/Library)
     - Calls: triggerToast (External/Library)
     - Calls: console.warn (External/Library)
-  - Function/Scope: handleLocationAccept (Lines 1275-1277)
+  - Function/Scope: handleLocationAccept (Lines 1353-1355)
     - Calls: handleArmActivation (Local)
-  - Function/Scope: handleLocationDecline (Lines 1279-1283)
+  - Function/Scope: handleLocationDecline (Lines 1357-1361)
     - Calls: setIsActivating (External/Library)
     - Calls: setLocationError (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handleClearAlertHistory (Lines 1285-1288)
+  - Function/Scope: handleClearAlertHistory (Lines 1363-1366)
     - Calls: setAlertHistory (External/Library)
     - Calls: localStorage.removeItem (External/Library)
-  - Function/Scope: handleRemoveAlertHistoryItem (Lines 1290-1296)
+  - Function/Scope: handleRemoveAlertHistoryItem (Lines 1368-1374)
     - Calls: setAlertHistory (External/Library)
     - Calls: prev.filter (External/Library)
     - Calls: localStorage.setItem (External/Library)
     - Calls: JSON.stringify (External/Library)
-  - Function/Scope: handleTestSiren (Lines 1299-1302)
+  - Function/Scope: handleTestSiren (Lines 1377-1380)
     - Calls: playSiren (External/Library)
     - Calls: setTimeout (External/Library)
     - Calls: stopSiren (External/Library)
-  - Function/Scope: handleShareApp (Lines 1305-1321)
+  - Function/Scope: handleShareApp (Lines 1383-1399)
     - Calls: navigator.share (External/Library)
     - Calls: navigator.clipboard.writeText (External/Library)
     - Calls: triggerToast (External/Library)
-  - Function/Scope: handlePwaInstall (Lines 1324-1333)
+  - Function/Scope: handlePwaInstall (Lines 1402-1411)
     - Calls: pwaPrompt.prompt (External/Library)
     - Calls: pwaPrompt.userChoice.then (External/Library)
     - Calls: setPwaPrompt (External/Library)
-  - Function/Scope: handleFocusTrajectory (Lines 1336-1349)
+  - Function/Scope: handleFocusTrajectory (Lines 1414-1427)
     - Calls: getGeometryCentroid (Imported from src/utils/geoUtils.ts)
     - Calls: setCurrentLat (External/Library)
     - Calls: setCurrentLon (External/Library)
     - Calls: setMapMode (External/Library)
     - Calls: console.warn (External/Library)
-  - Function/Scope: handleFocusMD (Lines 1351-1362)
+  - Function/Scope: handleFocusMD (Lines 1429-1440)
     - Calls: md.coordinates.map (External/Library)
     - Calls: lats.reduce (External/Library)
     - Calls: lons.reduce (External/Library)
@@ -3634,13 +3638,91 @@ export default function App() {
         const payload = await res.json();
         setTornadogenesisData(payload);
       } else {
-        console.warn('Server analyzer endpoint responded with error status:', res.status);
+        console.warn('Server analyzer endpoint responded with error status:', res.status, '- activating client-side diagnostic fallback.');
+        throw new Error(`Server returned status: ${res.status}`);
       }
     } catch (e) {
-      console.warn('Failed to parse microclimate convective ingredients:', e);
+      console.warn('Utilizing client-side backup Solver core for convective parameters:', e);
+      // Scientific heuristic model running fully client-side to prevent network blocker aborts:
+      const tempF = parseFloat(String(targetTelemetry.temperature || '70'));
+      const dewF = parseFloat(String(targetTelemetry.dewPoint || '60'));
+      const windMph = parseFloat(String(targetTelemetry.windSpeed || '0'));
+      const gustMph = parseFloat(String(targetTelemetry.windGust || '0'));
+      const capeJkg = targetCape || 0;
+
+      // 1. Moisture Metric (Favorable when dewpoint is high, depression is low)
+      const depression = tempF - dewF;
+      let moistureDiagnostic = 'Marginal (Dewpoint low/dry air intrusion)';
+      let moistureScore = 10;
+      if (dewF >= 70 && depression <= 4) {
+        moistureDiagnostic = 'Highly Favorable (Rich boundary layer moisture, low LCL height)';
+        moistureScore = 30;
+      } else if (dewF >= 60 && depression <= 8) {
+        moistureDiagnostic = 'Favorable (Moderate moisture depth, supportive surface LCLs)';
+        moistureScore = 20;
+      }
+
+      // 2. Instability Metric (Based on CAPE)
+      let instabilityDiagnostic = 'Stable / Weak Convection';
+      let instabilityScore = 5;
+      if (capeJkg >= 2500) {
+        instabilityDiagnostic = 'Extreme Instability (MUCAPE > 2500 J/kg, explosive updrafts)';
+        instabilityScore = 30;
+      } else if (capeJkg >= 1500) {
+        instabilityDiagnostic = 'Moderate to Strong Instability (Buoyancy supportive of severe cores)';
+        instabilityScore = 20;
+      } else if (capeJkg >= 500) {
+        instabilityDiagnostic = 'Marginal Buoyancy (Weak convective columns)';
+        instabilityScore = 10;
+      }
+
+      // 3. Shear / Wind coupling Metric
+      const maxWind = Math.max(windMph, gustMph);
+      let shearDiagnostic = 'Weak vertical wind shear / low wind coupling';
+      let shearScore = 5;
+      if (maxWind >= 45) {
+        shearDiagnostic = 'High Shear (Severe kinematics, organized supercell environment)';
+        shearScore = 25;
+      } else if (maxWind >= 20) {
+        shearDiagnostic = 'Moderate Shear (Supportive speed shear profiles)';
+        shearScore = 15;
+      }
+
+      // 4. Lifting mechanism (based on active warning polygon count & SPC discussion presence)
+      const warningCount = alerts.filter(a => a.event.toUpperCase().includes('WARNING')).length;
+      let liftDiagnostic = 'Ambient frontal boundary/weak thermal convergence';
+      let liftScore = 10;
+      if (warningCount >= 2 || discussions.length > 0) {
+        liftDiagnostic = 'Strong Mesoscale Ascent (Active boundaries / convective outflows present)';
+        liftScore = 15;
+      }
+
+      const totalScore = moistureScore + instabilityScore + shearScore + liftScore;
+      const genesisProb = Math.min(95, Math.max(2, totalScore));
+
+      let displayMessage = 'Convective conditions are stable. Low tornadogenesis risk.';
+      if (genesisProb >= 70) {
+        displayMessage = 'Explosive convective growth environment. High wind shear and extreme buoyancy support tornadic cell initiation.';
+      } else if (genesisProb >= 40) {
+        displayMessage = 'Moderate convective threat. Watch local radar carefully for velocity coupling signs.';
+      } else if (genesisProb >= 20) {
+        displayMessage = 'Convective elements present. Low probability of organized supercellular development.';
+      }
+
+      setTornadogenesisData({
+        genesis_probability_pct: genesisProb,
+        display_message: displayMessage,
+        metrics: {
+          moisture: moistureDiagnostic,
+          instability: instabilityDiagnostic,
+          lift: liftDiagnostic,
+          shear: shearDiagnostic
+        }
+      });
     } finally {
       setIsAnalyzingTelemetry(false);
     }
+
   }, [telemetry, windyPointTelemetry, capeHistory, discussions, alerts, logNetworkRequest]);
 
   // Automate background thermodynamic analysis on telemetry syncs
@@ -10321,7 +10403,7 @@ export default defineConfig(() => {
       },
     },
     server: {
-      port: 5500,
+      port: 3000,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâ€”file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
