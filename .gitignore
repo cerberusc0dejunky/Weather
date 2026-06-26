@@ -1,44 +1,8 @@
-# Dependencies
 node_modules/
-/.pnp
-.pnp.js
-
-# Testing
-/coverage
-
-# Production/Build
-/dist
-/build
-/out
-.next/
-
-# IDEs and Editors
-.idea/
-.vscode/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-.env
-
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# OS Files
+build/
+dist/
+coverage/
 .DS_Store
-Thumbs.db
-
-# Project-specific generated outputs
-/codebase_summary.txt
-.gemini/
-/scripts
+*.log
+.env*
+!.env.example

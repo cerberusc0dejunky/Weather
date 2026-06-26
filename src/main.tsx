@@ -1,8 +1,6 @@
-import { StrictMode } from 'react';
-import ReactDOM from 'react-dom/client';
-import { RouterProvider } from 'react-router';
-import { ToastProvider } from './contexts/ToastContext';
-import router from './router';
+import {StrictMode} from 'react';
+import {createRoot} from 'react-dom/client';
+import App from './App.tsx';
 import './index.css';
 
 // Dynamically initialize Google Analytics if VITE_GA_MEASUREMENT_ID is configured
@@ -23,11 +21,9 @@ if (gaId) {
   document.head.appendChild(script2);
 }
 
-ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ToastProvider>
-      <RouterProvider router={router} />
-    </ToastProvider>
+    <App />
   </StrictMode>,
 );
 
