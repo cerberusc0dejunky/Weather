@@ -1,38 +1,34 @@
-name: Deploy Weather App
+name: Deploy D.A.I.S.Y. to Cloudflare Pages
 
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - main # Or whichever branch you deploy from
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
-        uses: cerberusc0dejunky/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-      - name: Set up Node.js
-        uses: cerberusc0dejunky/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
         with:
-          node-version: 18
-          cache: 'npm'
+          node-version: '20'
 
       - name: Install Dependencies
-        run: |
-          rm -rf node_modules package-lock.json
-          npm install
+        run: npm install
 
-      - name: Install Platform-Specific Tailwind Engine
-        run: npm install @tailwindcss/oxide-linux-x64-gnu --save-optional
-
-      - name: Build Project
-        run: npm run build
+      - name: Build Frontend SPA
+        # Running Vite directly to bypass the server.ts esbuild step
+        run: npx vite build 
 
       - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy dist --project-name=weather --verbose
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: daisy # Replace with your Cloudflare project name
+          directory: dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
