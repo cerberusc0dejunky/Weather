@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, memo } from 'react';
 import { LocationAsset, NWSAlert, MesoscaleDiscussion, RotationPin } from '../types';
 import { getDistance, getBearing, getGeometryCentroid, getMemoizedMinPolygonDistance } from '../utils/geoUtils';
 import { Compass, Eye, Shield, MapPin, Layers, RefreshCcw, Globe, CloudRain, Wind, Search, Navigation, Info } from 'lucide-react';
@@ -134,7 +134,7 @@ declare global {
   }
 }
 
-export default function RadarMap({
+export function RadarMapComponent({
   userLat,
   userLon,
   assets,
@@ -1508,3 +1508,20 @@ export default function RadarMap({
     </div>
   );
 }
+
+const RadarMap = memo(RadarMapComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.userLat === nextProps.userLat &&
+    prevProps.userLon === nextProps.userLon &&
+    prevProps.assets === nextProps.assets &&
+    prevProps.alerts === nextProps.alerts &&
+    prevProps.activeThreats === nextProps.activeThreats &&
+    prevProps.discussions === nextProps.discussions &&
+    prevProps.rotationPins === nextProps.rotationPins &&
+    prevProps.mapMode === nextProps.mapMode &&
+    prevProps.customMapKey === nextProps.customMapKey &&
+    prevProps.userMaskActive === nextProps.userMaskActive
+  );
+});
+
+export default RadarMap;
