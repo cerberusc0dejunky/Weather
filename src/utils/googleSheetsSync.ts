@@ -20,13 +20,16 @@ export const syncToGoogleSheets = async (
 
     const res = await fetch(appsScriptUrl, {
       method: 'POST',
+      mode: 'no-cors', // Crucial for Google Apps Script Webhooks to bypass the 302 redirect changing POST to GET
       headers: {
-        'Content-Type': 'text/plain', // Using text/plain avoids some CORS preflight issues with Apps Script
+        'Content-Type': 'text/plain',
       },
       body: JSON.stringify(data),
     });
 
-    if (!res.ok) {
+    // When using no-cors, the response is opaque (status 0). 
+    // We cannot read the success message from Google, but the data was sent.
+    if (res.type !== 'opaque' && !res.ok) {
       throw new Error(`Failed to sync to Google Sheets (status: ${res.status})`);
     }
 
