@@ -431,17 +431,15 @@ export default function RadarMap({
 
     // Setup interactive map action event listeners
     try {
-      map.off('mousemove');
-      map.off('mouseout');
-      map.off('zoomend');
-      map.off('click');
+      if (!(map as any).hasDaisyEvents) {
+        (map as any).hasDaisyEvents = true;
 
-      map.on('mousemove', (e: any) => {
-        const { lat, lng } = e.latlng;
-        if (coordsDisplayRef.current) {
-          coordsDisplayRef.current.innerText = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-        }
-      });
+        map.on('mousemove', (e: any) => {
+          const { lat, lng } = e.latlng;
+          if (coordsDisplayRef.current) {
+            coordsDisplayRef.current.innerText = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+          }
+        });
 
       map.on('mouseout', () => {
         if (coordsDisplayRef.current) {
@@ -469,7 +467,8 @@ export default function RadarMap({
             </div>
           `)
           .openOn(map);
-      });
+        });
+      }
     } catch (e) {
       console.warn('Click/Hover listeners subscription failed:', e);
     }

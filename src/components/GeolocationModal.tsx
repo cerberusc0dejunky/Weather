@@ -38,7 +38,7 @@ export default function GeolocationModal({ onAccept, onDecline }: GeolocationMod
               Transient Client State
             </p>
             <p className="leading-relaxed mt-0.5">
-              Because this app persists data in your secure memory browser storage, reloading your browser window will reset active alarms. You will need to click "Activate Alarms" again and consent to GPS retrieval upon reload.
+              Refresh means reset no browser history saved but we do need your location to give you proximity alerts.
             </p>
           </div>
         </div>
