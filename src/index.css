@@ -1,0 +1,234 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-neon-pink: #ff69b4;
+  --color-neon-aqua: #00ffff;
+  --color-dark-surface: #0a0f24;
+}
+
+/* Light / Dark Mode root theme variables matching the original DAISY palette */
+:root {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-color: #e2e8f0;
+  --card-bg: #ffffff;
+  --card-border: #cbd5e1;
+}
+
+.dark {
+  --bg-primary: #020617;
+  --bg-secondary: #0f172a;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --border-color: #1e293b;
+  --card-bg: #0b0f19;
+  --card-border: #1e293b;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  text-shadow: 0 0 5px rgba(0, 0, 139, 0.08); /* subtle text text shadow on light mode, masked in dark */
+  font-family: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+.dark body {
+  text-shadow: none;
+}
+
+/* Original head text overrides */
+h1 {
+  color: white;
+  text-shadow: 0 0 10px #ff69b4, 0 0 20px #00ffff;
+}
+
+h2 {
+  color: white;
+  text-shadow: 0 0 10px #ff69b4, 0 0 20px #00ffff;
+}
+
+h3, h4 {
+  color: white;
+  text-shadow: 0 0 5px rgba(75, 0, 130, 0.2);
+}
+
+.dark h3, .dark h4 {
+  color: white;
+  text-shadow: 0 0 5px #4b0082;
+}
+
+/* Original Brand-Border styling */
+.brand-border {
+  border: 3px solid transparent;
+  border-image: linear-gradient(to right, #ff69b4, #00ffff) 1;
+  box-shadow: 2px 2px 8px pink, 12px 12px 12px aqua;
+}
+
+/* Custom Utilities on top of Tailwind */
+.neon-border {
+  border: 3px solid transparent;
+  background-image: linear-gradient(#050716, #050716), linear-gradient(135deg, #ff69b4, #00ffff);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: 2px 2px 10px rgba(255, 105, 180, 0.4), 0 0 20px rgba(0, 255, 255, 0.4);
+}
+
+.neon-text-pink {
+  color: #ff69b4;
+  text-shadow: 0 0 5px rgba(255, 105, 180, 0.6), 0 0 12px rgba(255, 105, 180, 0.2);
+}
+
+.neon-text-aqua {
+  color: #00ffff;
+  text-shadow: 0 0 5px rgba(0, 255, 255, 0.6), 0 0 12px rgba(0, 255, 255, 0.2);
+}
+
+.neon-text-glow {
+  color: #ffffff;
+  text-shadow: 0 0 8px #ff69b4, 0 0 18px #00ffff;
+}
+
+.pulsing-dot {
+  animation: marker-pulse-subtle 1.5s infinite;
+}
+
+/* Animations */
+@keyframes marker-pulse-subtle {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes marker-pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+  70% { transform: scale(1.15); box-shadow: 0 0 0 12px rgba(59, 130, 246, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+.user-marker-pulse {
+  animation: marker-pulse 2s infinite;
+}
+
+@keyframes flash-severe {
+  0%, 100% { background-color: #020617; }
+  50% { background-color: #7f1d1d; }
+}
+
+.dark .flash-active-severe {
+  animation: flash-severe 1s infinite !important;
+}
+
+@keyframes flash-severe-light {
+  0%, 100% { background-color: #ffffff; }
+  50% { background-color: #fee2e2; }
+}
+
+.flash-active-severe {
+  animation: flash-severe-light 1s infinite !important;
+}
+
+@keyframes strobe-pds {
+  0%, 100% { border-color: #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.5); }
+  50% { border-color: #020617; box-shadow: 0 0 40px #ff0000; }
+}
+
+.strobe-pds-active {
+  animation: strobe-pds 0.4s infinite;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* High visibility pulsating animation for severe threat markers on map */
+@keyframes high-threat-ripple {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7);
+  }
+  70% {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 12px rgba(249, 115, 22, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+  }
+}
+
+@keyframes extreme-threat-ripple {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.9);
+  }
+  50% {
+    transform: scale(1.3);
+    box-shadow: 0 0 0 16px rgba(225, 29, 72, 0.4);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(225, 29, 72, 0);
+  }
+}
+
+.high-threat-pulse {
+  animation: high-threat-ripple 1.8s infinite ease-in-out;
+}
+
+.extreme-threat-pulse {
+  animation: extreme-threat-ripple 1.2s infinite ease-in-out;
+}
+
+@keyframes rotation-ripple {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(255, 105, 180, 0.9);
+  }
+  50% {
+    transform: scale(1.25);
+    box-shadow: 0 0 0 14px rgba(0, 255, 255, 0.4);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(255, 105, 180, 0);
+  }
+}
+
+.rotation-threat-pulse {
+  animation: rotation-ripple 1.4s infinite ease-in-out;
+}
+
+/* High-resolution radar filtering utilities */
+.radar-high-res-enhanced {
+  filter: contrast(180%) saturate(160%) brightness(105%) drop-shadow(0 0 2px rgba(0, 255, 255, 0.3));
+  transition: filter 0.3s ease;
+}
+
+.radar-standard-rendering {
+  filter: none;
+  transition: filter 0.3s ease;
+}
+
+
