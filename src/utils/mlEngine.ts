@@ -162,20 +162,26 @@ export async function compileModel(
   };
 }
 
+export interface MlInferenceResult {
+  tornadoProbability: number;
+  downburstRisk: 'None' | 'Moderate' | 'High' | 'Extreme';
+}
+
 export async function runMlInference(inputs: {
   cape: number;
   dewPoint: number;
   shearMph: number;
   rotationPins?: RotationPin[];
-}): Promise<number | null> {
+}): Promise<MlInferenceResult | null> {
   // We can always run it, if not compiled just auto-compile or act as deterministic formula
   if (!isCompiled) {
     isCompiled = true; // Auto-assume fallback weights are active
   }
 
-  const normCape = Math.min(1, inputs.cape / 3000);
+  // Normalize based on research thresholds
+  const normCape = Math.min(1, inputs.cape / 2500); // > 2500 J/kg is Extreme
   const normDp = Math.max(0, Math.min(1, (inputs.dewPoint - 50) / 30));
-  const normShear = Math.min(1, inputs.shearMph / 60);
+  const normShear = Math.min(1, inputs.shearMph / 50); // 40-46 mph needed to sustain supercells
 
   let wCape = 0.35;
   let wDp = 0.30;
@@ -184,6 +190,7 @@ export async function runMlInference(inputs: {
 
   const pins = Array.isArray(inputs.rotationPins) ? inputs.rotationPins : [];
   if (pins.length > 0) {
+    // If there is active rotation, wind shear becomes the dominant predictive factor
     wShear = 0.45;
     wCape = 0.30;
     wDp = 0.25;
@@ -212,9 +219,28 @@ export async function runMlInference(inputs: {
     rotationScore = Math.min(0.85, rotationScore);
   }
 
-  const rawScore = (normCape * wCape + normDp * wDp + normShear * wShear) + (rotationScore * 0.4);
+  // Collapse Penalty (Haboob/Downburst Signature)
+  // High CAPE drives the updraft, but lack of shear causes precipitation loading and total collapse.
+  // This is the polar opposite of a tornadic environment.
+  let collapsePenalty = 0;
+  if (inputs.cape > 1500 && inputs.shearMph < 35) {
+    // The environment is primed to collapse on itself rather than sustain a rotating updraft
+    const capeFactor = Math.min(1, (inputs.cape - 1500) / 2000); // Scales up with CAPE
+    const shearDeficit = (35 - inputs.shearMph) / 35; // Scales up as shear drops
+    collapsePenalty = Math.min(0.5, capeFactor * shearDeficit); 
+  }
+
+  // Calculate raw score and subtract the downburst collapse penalty
+  let rawScore = (normCape * wCape + normDp * wDp + normShear * wShear) + (rotationScore * 0.4);
+  rawScore -= collapsePenalty;
   
   const probability = 1 / (1 + Math.exp(-10 * (rawScore - 0.55)));
+  const finalProbability = Math.min(100, Math.max(0, Math.round(probability * 100)));
   
-  return Math.min(100, Math.max(0, Math.round(probability * 100)));
+  let downburstRisk: 'None' | 'Moderate' | 'High' | 'Extreme' = 'None';
+  if (collapsePenalty > 0.4) downburstRisk = 'Extreme';
+  else if (collapsePenalty > 0.25) downburstRisk = 'High';
+  else if (collapsePenalty > 0.1) downburstRisk = 'Moderate';
+
+  return { tornadoProbability: finalProbability, downburstRisk };
 }
