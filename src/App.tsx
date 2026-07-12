@@ -473,9 +473,13 @@ export default function App() {
     runInference();
   }, [telemetry, windyPointTelemetry, rotationPins]);
 
-  const handleSyncMl = async () => {
-    setIsSyncingMl(true);
-    triggerToast('Sending ML Snapshot to Google Sheets...', 'info');
+  const handleSyncMl = async (isAuto = false) => {
+    if (!isAuto) {
+      setIsSyncingMl(true);
+      triggerToast('Sending ML Snapshot to Google Sheets...', 'info');
+    } else {
+      triggerToast('Auto-archiving expired alert telemetry to Sheets...', 'info');
+    }
     try {
       await syncToGoogleSheets({
         alerts,
@@ -483,13 +487,18 @@ export default function App() {
         telemetry,
         geminiReport: `Tornadogenesis Probability: ${tornadogenesisData?.genesis_probability_pct || 0}%`,
       });
-      triggerToast('ML Snapshot synced to Sheets!', 'success');
+      if (!isAuto) triggerToast('ML Snapshot synced to Sheets!', 'success');
     } catch (err: any) {
       triggerToast(`Sync failed: ${err.message}`, 'error');
     } finally {
-      setIsSyncingMl(false);
+      if (!isAuto) setIsSyncingMl(false);
     }
   };
+
+  const handleSyncMlRef = useRef(handleSyncMl);
+  useEffect(() => {
+    handleSyncMlRef.current = handleSyncMl;
+  }, [handleSyncMl]);
 
   // User notifications toast system (replacing iframe-blocked alert popups)
   const [notificationToast, setNotificationToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
@@ -617,6 +626,10 @@ export default function App() {
         if (expired.length > 0) {
           addAlertsToHistoryRef.current(expired);
           triggerToast(`${expired.length} threat${expired.length > 1 ? "s" : ""} expired and archived.`, "info");
+          
+          // Auto-trigger Google Sheets sync with the final telemetry metrics
+          handleSyncMlRef.current(true);
+
           return prevAlerts.filter((alert) => !alert.expires || new Date(alert.expires) > now);
         }
         return prevAlerts;
@@ -3008,7 +3021,7 @@ export default function App() {
 
                 <div className="mt-6 flex justify-end border-t border-slate-200 dark:border-slate-800 pt-4">
                   <button
-                    onClick={handleSyncMl}
+                    onClick={() => handleSyncMl(false)}
                     disabled={isSyncingMl}
                     className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] tracking-wider uppercase rounded-xl transition-all disabled:opacity-50 shadow-sm"
                   >
