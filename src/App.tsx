@@ -23,6 +23,8 @@ import {
   getParsedPolygonMinDistance,
   parseStormTrajectory,
 } from './utils/geoUtils';
+import { runMlInference } from './utils/mlEngine';
+import { syncToGoogleSheets } from './utils/googleSheetsSync';
 import ThreatCard from './components/ThreatCard';
 import GeolocationModal from './components/GeolocationModal';
 import RadarMap from './components/RadarMap';
@@ -428,17 +430,65 @@ export default function App() {
   }, [alerts]);
 
   // Experimental Tornadogenesis Probability Analysis States
-  const [tornadogenesisData, setTornadogenesisData] = useState<any | null>({
-    genesis_probability_pct: 78,
-    display_message: 'Atmospheric telemetry columns analyzed successfully.',
-    metrics: {
-      moisture: 'Saturated lower troposphere (Dewpoints > 70F)',
-      instability: 'Extreme MUCAPE > 3000 J/kg',
-      lift: 'Strong front boundary convergence',
-      shear: 'High effective SRH (Helicity > 300)'
-    }
-  });
+  const [tornadogenesisData, setTornadogenesisData] = useState<any | null>(null);
   const [isAnalyzingTelemetry, setIsAnalyzingTelemetry] = useState<boolean>(false);
+  const [isSyncingMl, setIsSyncingMl] = useState<boolean>(false);
+
+  // Live ML Engine Inference
+  useEffect(() => {
+    const runInference = async () => {
+      setIsAnalyzingTelemetry(true);
+      try {
+        const cape = windyPointTelemetry?.cape || (telemetry?.temperatureC && telemetry?.dewpointC ? 1500 : 0);
+        const dewPoint = telemetry?.dewpointC ? (telemetry.dewpointC * 9/5) + 32 : 55;
+        const shearMph = telemetry?.windSpeedKmH ? telemetry.windSpeedKmH * 0.621371 : 15;
+
+        const probability = await runMlInference({
+          cape,
+          dewPoint,
+          shearMph,
+          rotationPins
+        });
+
+        if (probability !== null) {
+          setTornadogenesisData({
+            genesis_probability_pct: probability,
+            display_message: 'Atmospheric telemetry columns analyzed by Local ML Engine.',
+            metrics: {
+              moisture: `Dewpoint: ${dewPoint.toFixed(1)}F`,
+              instability: `CAPE: ${Math.round(cape)} J/kg`,
+              lift: 'Live Front Boundary Tracking',
+              shear: `Surface Shear: ${shearMph.toFixed(1)} MPH`
+            }
+          });
+        }
+      } catch (err) {
+        console.error("ML Inference error:", err);
+      } finally {
+        setIsAnalyzingTelemetry(false);
+      }
+    };
+
+    runInference();
+  }, [telemetry, windyPointTelemetry, rotationPins]);
+
+  const handleSyncMl = async () => {
+    setIsSyncingMl(true);
+    triggerToast('Sending ML Snapshot to Google Sheets...', 'info');
+    try {
+      await syncToGoogleSheets({
+        alerts,
+        rotationPins,
+        telemetry,
+        geminiReport: `Tornadogenesis Probability: ${tornadogenesisData?.genesis_probability_pct || 0}%`,
+      });
+      triggerToast('ML Snapshot synced to Sheets!', 'success');
+    } catch (err: any) {
+      triggerToast(`Sync failed: ${err.message}`, 'error');
+    } finally {
+      setIsSyncingMl(false);
+    }
+  };
 
   // User notifications toast system (replacing iframe-blocked alert popups)
   const [notificationToast, setNotificationToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
@@ -2944,6 +2994,16 @@ export default function App() {
                       {tornadogenesisData.metrics?.shear || 'Modeling effective SRH grids...'}
                     </p>
                   </div>
+                </div>
+
+                <div className="mt-6 flex justify-end border-t border-slate-200 dark:border-slate-800 pt-4">
+                  <button
+                    onClick={handleSyncMl}
+                    disabled={isSyncingMl}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] tracking-wider uppercase rounded-xl transition-all disabled:opacity-50 shadow-sm"
+                  >
+                    {isSyncingMl ? 'Syncing...' : 'Sync ML Snapshot to Sheets'}
+                  </button>
                 </div>
               </div>
             ) : (
