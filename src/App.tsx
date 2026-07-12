@@ -26,11 +26,13 @@ import {
 import { runMlInference } from './utils/mlEngine';
 import { syncToGoogleSheets } from './utils/googleSheetsSync';
 import ThreatCard from './components/ThreatCard';
-import GeolocationModal from './components/GeolocationModal';
-import RadarMap from './components/RadarMap';
-import AlertHistory, { ResolvedAlert } from './components/AlertHistory';
+import type { ResolvedAlert } from './components/AlertHistory';
+import React, { Suspense } from 'react';
 
-import CapeHistoryChart from './components/CapeHistoryChart';
+const GeolocationModal = React.lazy(() => import('./components/GeolocationModal'));
+const RadarMap = React.lazy(() => import('./components/RadarMap'));
+const AlertHistory = React.lazy(() => import('./components/AlertHistory'));
+const CapeHistoryChart = React.lazy(() => import('./components/CapeHistoryChart'));
 
 // Lucide Icons (Never use Emojis!)
 import {
@@ -298,9 +300,19 @@ export default function App() {
   const [armed, setArmed] = useState<boolean>(false);
   const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
   const [isActivating, setIsActivating] = useState<boolean>(false);
-  const [showTermsModal, setShowTermsModal] = useState<boolean>(true);
+  const [showTermsModal, setShowTermsModal] = useState<boolean>(() => {
+    return localStorage.getItem('daisy-terms-agreed') !== 'true';
+  });
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [termsAgreed, setTermsAgreed] = useState<boolean>(false);
+  const [termsAgreed, setTermsAgreed] = useState<boolean>(() => {
+    return localStorage.getItem('daisy-terms-agreed') === 'true';
+  });
+
+  useEffect(() => {
+    if (termsAgreed) {
+      localStorage.setItem('daisy-terms-agreed', 'true');
+    }
+  }, [termsAgreed]);
   
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('daisy-theme');
@@ -482,6 +494,8 @@ export default function App() {
     }
     try {
       await syncToGoogleSheets({
+        latitude: currentLat,
+        longitude: currentLon,
         alerts,
         rotationPins,
         telemetry,
@@ -2237,7 +2251,9 @@ export default function App() {
     <div className={`min-h-screen flex flex-col text-slate-900 dark:text-slate-100 ${settings.flash && isAnyDirectHitWarningActive ? 'flash-active-severe' : 'bg-slate-50 dark:bg-slate-950'} transition-colors duration-300`}>
       {/* Geolocation Modal Engagement */}
       {showLocationModal && (
-        <GeolocationModal onAccept={handleLocationAccept} onDecline={handleLocationDecline} />
+        <Suspense fallback={null}>
+          <GeolocationModal onAccept={handleLocationAccept} onDecline={handleLocationDecline} />
+        </Suspense>
       )}
 
       {/* PWA Saved/Install Guide Modal */}
@@ -2431,7 +2447,7 @@ export default function App() {
             <div className="flex items-start gap-3">
               <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
               <div>
-                <h4 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Data Protection Disclosure</h4>
+                <h2 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Data Protection Disclosure</h2>
                 <p className="mt-0.5 leading-relaxed text-[11px] text-slate-400">
                   D.A.I.S.Y. prioritizes private-by-default workflows. Geolocated coordinates, monitored secure spots, and historical alert profiles are calculated and kept exclusively inside your local browser storage. No user positions, network traces, or tracking files are sent, shared, or maintained by external cloud bases.
                 </p>
@@ -2441,7 +2457,7 @@ export default function App() {
             <div className="flex items-start gap-3 border-t border-slate-800/60 pt-3">
               <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
               <div>
-                <h4 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Transient Session state Limit</h4>
+                <h2 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Transient Session state Limit</h2>
                 <p className="mt-0.5 leading-relaxed text-[11px] text-slate-400">
                   This application functions as a high-frequency telemetry workspace. Reloading or refreshing your browser session forces a complete security clearance and state cycle. If you reload, you must reactivate alarms and grant GPS safety permissions again.
                 </p>
@@ -2470,6 +2486,7 @@ export default function App() {
             <button 
               onClick={() => setNotificationToast(null)}
               className="text-slate-400 hover:text-slate-600 dark:hover:text-white shrink-0 font-bold p-0.5"
+              aria-label="Close notification"
             >
               ×
             </button>
@@ -2482,9 +2499,9 @@ export default function App() {
             <div className="flex items-center gap-3 text-white">
               <AlertOctagon className="w-6 h-6 text-red-500 shrink-0" />
               <div>
-                <h4 className="text-sm font-black uppercase text-red-200">
+                <h2 className="text-sm font-black uppercase text-red-200">
                   Critical Warning Threshold Triggered
-                </h4>
+                </h2>
                 <p className="text-red-300 text-xs font-semibold leading-relaxed">
                   Convective cell polygon boundary intersects safe house anchor systems. Evacuate exterior grids.
                 </p>
@@ -2680,22 +2697,24 @@ export default function App() {
           
           {/* 1. Spatial Interactive Radar Map (Full width) */}
           <div className="w-full">
-            <RadarMap
-              userLat={currentLat}
-              userLon={currentLon}
-              assets={assets}
-              alerts={alerts}
-              activeThreats={alerts.filter((a) => a.threatLevel === 'High' || a.threatLevel === 'Extreme')}
-              discussions={discussions}
-              rotationPins={rotationPins}
-              mapMode={mapMode}
-              onMapModeChange={setMapMode}
-              onSetCoordinates={(lat, lon) => {
-                setCurrentLat(lat);
-                setCurrentLon(lon);
-              }}
-              customMapKey={customMapKey}
-            />
+            <Suspense fallback={<div className="w-full h-[600px] bg-slate-900 rounded-3xl flex items-center justify-center text-cyan-500 animate-pulse font-mono uppercase tracking-widest text-xs font-bold border border-slate-800">Booting Map Engine...</div>}>
+              <RadarMap
+                userLat={currentLat}
+                userLon={currentLon}
+                assets={assets}
+                alerts={alerts}
+                activeThreats={alerts.filter((a) => a.threatLevel === 'High' || a.threatLevel === 'Extreme')}
+                discussions={discussions}
+                rotationPins={rotationPins}
+                mapMode={mapMode}
+                onMapModeChange={setMapMode}
+                onSetCoordinates={(lat, lon) => {
+                  setCurrentLat(lat);
+                  setCurrentLon(lon);
+                }}
+                customMapKey={customMapKey}
+              />
+            </Suspense>
           </div>          {/* Spatial Interactive Disclaimer Panel */}
           <div className="w-full p-5 bg-rose-50 dark:bg-rose-950/10 border border-rose-200 dark:border-red-500/20 rounded-3xl flex gap-3 text-rose-700 dark:text-red-400 transition-colors">
             <Info className="w-5 h-5 text-rose-600 dark:text-red-500 shrink-0" />
@@ -2708,10 +2727,10 @@ export default function App() {
           <div className="w-full">
             <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="Coordinates Manager">
               <div>
-                <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                <h2 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
                   <MapPin className="w-4 h-4 text-cyan-600 dark:text-neon-aqua" />
                   Monitored Coordinates Anchor
-                </h3>
+                </h2>
 
                 <div className="flex flex-col md:flex-row gap-5 items-start">
                   {/* Add Coordinates Search Input */}
@@ -2732,6 +2751,7 @@ export default function App() {
                       onClick={handleAddNewPin}
                       disabled={searching}
                       className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
+                      aria-label="Add location pin"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -2775,9 +2795,10 @@ export default function App() {
                               e.stopPropagation();
                               handleRemovePin(asset.id);
                             }}
-                            className="p-1 text-slate-400 hover:text-rose-500 dark:hover:text-neon-pink shrink-0 transition-colors cursor-pointer"
+                            className="p-1 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-md transition-colors"
+                            aria-label="Remove location"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-3.5 h-3.5 text-rose-500 hover:text-red-600 cursor-pointer transition-colors" />
                           </button>
                         </div>
                       ))
@@ -2791,10 +2812,10 @@ export default function App() {
           {/* 3. Ground Surface Air Telemetry (NWS ASOS) & Local Forecast trends (Unified ASOS & Bypass Dashboard) */}
           <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="NWS Telemetry and Forecast Microclimate Analysis">
             <div>
-              <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
+              <h2 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
                 <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
                 Ground Surface Air Telemetry (NWS ASOS) & Local Microclimate Trends
-              </h3>
+              </h2>
               
               {telemetry ? (
                 <>
@@ -3041,10 +3062,10 @@ export default function App() {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-2">
                 <div>
-                  <h4 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider flex items-center gap-2">
+                  <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider flex items-center gap-2">
                     <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
                     D.A.I.S.Y. Microclimate Forecast Trends & Storm Bypass Index
-                  </h4>
+                  </h3>
                   <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-0.5 uppercase font-mono">
                     Thermodynamic course & intensity prediction computed over 6-hour trailing metrics
                   </p>
@@ -3235,11 +3256,13 @@ export default function App() {
 
         {/* Alert History Section */}
         <div className="mt-8">
-          <AlertHistory
-            history={alertHistory}
-            onClearHistory={handleClearAlertHistory}
-            onRemoveItem={handleRemoveAlertHistoryItem}
-          />
+          <Suspense fallback={<div className="h-[200px] bg-slate-100 dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 animate-pulse font-mono uppercase tracking-widest text-xs font-bold">Loading Alert History Archive...</div>}>
+            <AlertHistory
+              history={alertHistory}
+              onClearHistory={handleClearAlertHistory}
+              onRemoveItem={handleRemoveAlertHistoryItem}
+            />
+          </Suspense>
         </div>
 
         {/* SPC Mesoscale Discussions Listings Section */}
@@ -3261,9 +3284,9 @@ export default function App() {
           {/* Collapsible custom input board */}
           {showMDInputForm && (
             <div className="bg-white dark:bg-slate-900 border border-amber-500/30 rounded-3xl p-5 shadow-inner transition-all">
-              <h4 className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 font-sans tracking-wide mb-2">
+              <h3 className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 font-sans tracking-wide mb-2">
                 Manual Forecast Segment Direct Infiltration (MCD Parser)
-              </h4>
+              </h3>
               <p className="text-[10px] text-slate-400 mb-4 font-semibold uppercase tracking-wider">
                 Paste the full SPC Mesoscale Discussion raw text below (must contain the "LAT...LON" block at the end).
               </p>

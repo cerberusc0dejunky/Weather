@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://daisy.c0dejunky.com/sitemap.xml

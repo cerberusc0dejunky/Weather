@@ -371,6 +371,24 @@ export default function RadarMap({
     };
   }, [initError, userLat, userLon, apiLoaded]);
 
+  // Pan the Windy Map if the top-level user coordinates change (e.g. from the main search bar)
+  useEffect(() => {
+    const map = windyMapRef.current;
+    if (map && lastSetCoordinatesRef.current) {
+      const dist = Math.sqrt(
+        Math.pow(lastSetCoordinatesRef.current.lat - userLat, 2) + 
+        Math.pow(lastSetCoordinatesRef.current.lon - userLon, 2)
+      );
+      // Only pan if the location changed significantly (prevents tiny GPS jitter from interrupting the user)
+      if (dist > 0.05) { 
+        try {
+          map.setView([userLat, userLon]);
+          lastSetCoordinatesRef.current = { lat: userLat, lon: userLon };
+        } catch (e) {}
+      }
+    }
+  }, [userLat, userLon]);
+
   // Sync Positions and Alert Polygons
   useEffect(() => {
     updateInteractiveElements();

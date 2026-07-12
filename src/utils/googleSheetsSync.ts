@@ -1,6 +1,8 @@
 import { NWSAlert, RotationPin, TelemetryConditions } from '../types';
 
 interface ExportData {
+  latitude?: number;
+  longitude?: number;
   alerts: NWSAlert[];
   rotationPins: RotationPin[];
   telemetry: TelemetryConditions | null;
