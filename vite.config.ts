@@ -24,5 +24,18 @@ export default defineConfig(() => {
       environment: 'jsdom',
       setupFiles: ['./src/setupTests.ts'],
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-recharts': ['recharts'],
+            'vendor-turf': ['@turf/turf'],
+            'vendor-lucide': ['lucide-react'],
+          },
+        },
+      },
+      chunkSizeWarningLimit: 1000,
+    },
   };
 });

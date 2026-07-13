@@ -3,6 +3,7 @@ import { LocationAsset, NWSAlert, MesoscaleDiscussion, RotationPin } from '../ty
 import { getDistance, getBearing, getGeometryCentroid, getMemoizedMinPolygonDistance } from '../utils/geoUtils';
 import { Compass, Eye, Shield, MapPin, Layers, RefreshCcw, Globe, CloudRain, Wind, Search, Navigation, Info } from 'lucide-react';
 import { useWindyFailsafe } from '../utils/useWindyFailsafe';
+import { runMlInference } from '../utils/mlEngine';
 
 // Helper to convert cardinal directions or degrees into azimuth bearing degrees
 function getDegreesFromDirection(dirStr: string): number | null {
@@ -238,7 +239,7 @@ export default function RadarMap({
         const dewPointF = (dewVal - 273.15) * 9/5 + 32;
         const windMph = windVal * 2.23694;
 
-        const { runMlInference } = await import('../utils/mlEngine');
+
         const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
 
         if (result) {

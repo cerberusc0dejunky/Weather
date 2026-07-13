@@ -9,7 +9,8 @@ import {
   Tooltip,
 } from 'recharts';
 import SafeResponsiveContainer from './components/SafeResponsiveContainer';
-import { LocationAsset, NWSAlert, TelemetryConditions, SystemSettings, MesoscaleDiscussion, RotationPin, NetworkRequestLog } from './types';
+import { fetchChaserReports } from './utils/chaserSync';
+import { SystemSettings, NWSAlert, LocationAsset, TelemetryConditions, MesoscaleDiscussion, RotationPin, NetworkRequestLog, ChaserReport } from './types';
 import {
   getDistance,
   getBearing,
@@ -387,8 +388,8 @@ function App() {
   const [pressureHistory, setPressureHistory] = useState<{ time: string; pressure: number }[]>([]);
   const [capeHistory, setCapeHistory] = useState<{ time: string; timestamp: number; cape: number; isForecast?: boolean }[]>([]);
 
-  const [currentLat, setCurrentLat] = useState<number>(35.385);
-  const [currentLon, setCurrentLon] = useState<number>(-94.398);
+  const [currentLat, setCurrentLat] = useState<number>(29.5958);
+  const [currentLon, setCurrentLon] = useState<number>(-90.7195);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searching, setSearching] = useState<boolean>(false);
   
@@ -436,11 +437,28 @@ function App() {
 
   // Potential rotation pins state derived from active alerts
   const [rotationPins, setRotationPins] = useState<RotationPin[]>([]);
+  const [chaserReports, setChaserReports] = useState<ChaserReport[]>([]);
 
-  // Keep rotationPins synchronized with active alerts
+  // Keep rotationPins synchronized with active alerts and chaser reports
   useEffect(() => {
-    setRotationPins(translateAlertsToRotationPins(alerts));
-  }, [alerts]);
+    const alertPins = translateAlertsToRotationPins(alerts);
+    const chaserPins: RotationPin[] = chaserReports
+      .filter(r => r.rotationVisible || r.tornadoOnGround || r.wallCloud)
+      .map(r => ({
+        id: `chaser-${r.id}`,
+        lat: r.lat,
+        lon: r.lon,
+        alertId: `chaser-report-${r.id}`,
+        eventName: r.tornadoOnGround ? 'Tornado On Ground (Chaser Verified)' : r.rotationVisible ? 'Rotation Visible (Chaser Verified)' : 'Wall Cloud (Chaser Verified)',
+        areaDesc: 'Spotter Field Report',
+        detectedAt: r.timestamp,
+        pinType: r.tornadoOnGround ? 'vortex' : 'mesocyclone',
+        threatLevel: r.tornadoOnGround ? 'Extreme' : 'Severe',
+        isObserved: true
+      }));
+
+    setRotationPins([...alertPins, ...chaserPins]);
+  }, [alerts, chaserReports]);
 
   // Experimental Tornadogenesis Probability Analysis States
   const [tornadogenesisData, setTornadogenesisData] = useState<any | null>(null);
@@ -465,13 +483,15 @@ function App() {
           cape,
           dewPoint,
           shearMph,
-          rotationPins
+          rotationPins,
+          chaserReports
         });
 
         if (result !== null) {
           setTornadogenesisData({
             genesis_probability_pct: result.tornadoProbability,
             downburst_risk: result.downburstRisk,
+            diagnostic_reflection: result.diagnosticReflection,
             display_message: 'Atmospheric telemetry columns analyzed by Local ML Engine.',
             metrics: {
               moisture: `Dewpoint: ${dewPoint.toFixed(1)}F`,
@@ -489,7 +509,22 @@ function App() {
     };
 
     runInference();
-  }, [telemetry, windyPointTelemetry, rotationPins]);
+  }, [telemetry, windyPointTelemetry, rotationPins, chaserReports]);
+
+  // Poll for Chaser Reports
+  useEffect(() => {
+    const pollChasers = async () => {
+      try {
+        const reports = await fetchChaserReports();
+        setChaserReports(reports);
+      } catch (err) {
+        console.error('Error polling chaser reports', err);
+      }
+    };
+    pollChasers();
+    const interval = setInterval(pollChasers, 30000); // Poll every 30s
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSyncMl = async (isAuto = false) => {
     if (!isAuto) {
@@ -693,7 +728,7 @@ function App() {
         const dewPointF = (dewVal - 273.15) * 9/5 + 32;
         const windMph = windVal * 2.23694;
 
-        const { runMlInference } = await import('./utils/mlEngine');
+
         const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
 
         setChaseTarget({
@@ -743,7 +778,7 @@ function App() {
         const dewPointF = (dewVal - 273.15) * 9/5 + 32;
         const windMph = windVal * 2.23694;
 
-        const { runMlInference } = await import('./utils/mlEngine');
+
         const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
 
         const syncData = {
@@ -3106,13 +3141,24 @@ function App() {
                           : 'MODERATE CONVECTIVE ENVIRONMENT'}
                       </span>
                       {tornadogenesisData.downburst_risk && tornadogenesisData.downburst_risk !== 'None' && (
-                        <span className={`px-2 py-0.5 rounded text-[8px] font-mono tracking-widest uppercase font-bold text-white ${
-                          tornadogenesisData.downburst_risk === 'Extreme' ? 'bg-fuchsia-600' :
+                        <div className={`mt-3 py-1.5 px-3 rounded text-[10px] font-black tracking-widest text-white uppercase text-center
+                          ${tornadogenesisData.downburst_risk === 'Extreme' ? 'bg-fuchsia-600' :
                           tornadogenesisData.downburst_risk === 'High' ? 'bg-purple-600' :
-                          'bg-indigo-600'
-                        }`}>
+                          'bg-indigo-600'}`}>
                           {tornadogenesisData.downburst_risk.toUpperCase()} DOWNBURST RISK
-                        </span>
+                        </div>
+                      )}
+
+                      {tornadogenesisData.diagnostic_reflection && (
+                        <div className="mt-4 p-3 bg-red-950/40 border border-red-500/50 rounded-xl">
+                           <div className="flex items-center gap-2 mb-1.5">
+                             <AlertTriangle className="w-4 h-4 text-red-500 animate-pulse" />
+                             <span className="text-[10px] font-black uppercase text-red-500 tracking-widest">Diagnostic Reflection Triggered</span>
+                           </div>
+                           <p className="text-xs font-bold text-red-200/80 leading-relaxed">
+                             {tornadogenesisData.diagnostic_reflection}
+                           </p>
+                        </div>
                       )}
                     </div>
                   </div>
