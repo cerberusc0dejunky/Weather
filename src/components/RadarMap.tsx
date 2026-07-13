@@ -130,6 +130,7 @@ declare global {
     windyStore?: any;
     L?: any;
     onMapSetCoordinates?: (lat: number, lon: number) => void;
+    onStormChaseProbe?: (lat: number, lon: number) => void;
   }
 }
 
@@ -195,6 +196,74 @@ export default function RadarMap({
       delete window.onMapSetCoordinates;
     };
   }, [onSetCoordinates]);
+
+  // Dynamically link Storm Chaser Probe trigger to global window
+  useEffect(() => {
+    window.onStormChaseProbe = async (lat: number, lon: number) => {
+      const probeContainer = document.getElementById('chase-probe-ui');
+      if (!probeContainer) return;
+      
+      probeContainer.innerHTML = `
+        <div class="animate-pulse flex flex-col items-center justify-center py-2">
+          <div class="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mb-1.5"></div>
+          <p class="text-[9px] text-cyan-600 font-bold tracking-widest uppercase">Probing Atmosphere...</p>
+        </div>
+      `;
+
+      try {
+        const pointKey = localStorage.getItem('daisy-windy-point-key') || (import.meta as any).env?.VITE_WINDY_POINT_KEY;
+        if (!pointKey) {
+          probeContainer.innerHTML = '<div class="text-[9px] text-red-500 font-bold text-center mt-2">API KEY REQUIRED</div>';
+          return;
+        }
+
+        const body = {
+          lat, lon, model: "gfs",
+          parameters: ["temp", "dewpoint", "wind", "gust", "pressure", "cape", "precip"],
+          levels: ["surface"], key: pointKey
+        };
+
+        const res = await fetch("https://api.windy.com/api/point-forecast/v2", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+        });
+
+        if (!res.ok) throw new Error("API failed");
+        const data = await res.json();
+        
+        const capeVal = data.cape?.["surface"]?.[0] || 0;
+        const dewVal = data.dewpoint?.["surface"]?.[0] || 285;
+        const windVal = data.wind?.["surface"]?.[0] || 5;
+        
+        const dewPointF = (dewVal - 273.15) * 9/5 + 32;
+        const windMph = windVal * 2.23694;
+
+        const { runMlInference } = await import('../utils/mlEngine');
+        const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
+
+        if (result) {
+          probeContainer.innerHTML = `
+            <div class="mt-2.5 pt-2 border-t border-slate-100 space-y-1">
+              <div class="flex justify-between items-center text-[10px]">
+                <span class="text-slate-500 font-semibold">TORNADOGENESIS</span>
+                <span class="font-black ${result.tornadoProbability > 30 ? 'text-red-500' : 'text-cyan-600'}">${result.tornadoProbability}%</span>
+              </div>
+              <div class="flex justify-between items-center text-[10px]">
+                <span class="text-slate-500 font-semibold">SFC CAPE</span>
+                <span class="font-bold text-slate-700">${Math.round(capeVal)} J/kg</span>
+              </div>
+              <div class="flex justify-between items-center text-[10px]">
+                <span class="text-slate-500 font-semibold">SHEAR</span>
+                <span class="font-bold text-slate-700">${Math.round(windMph)} MPH</span>
+              </div>
+            </div>
+          `;
+        }
+      } catch (err) {
+        probeContainer.innerHTML = '<div class="text-[9px] text-red-500 font-bold uppercase text-center mt-2">TELEMETRY FAILED</div>';
+      }
+    };
+    return () => { delete window.onStormChaseProbe; };
+  }, []);
 
   // Geocode location search utilizing Nominatim (failsafe free API)
   const handleGeoSearch = async (e: React.FormEvent) => {
@@ -471,21 +540,31 @@ export default function RadarMap({
 
       map.on('click', (e: any) => {
         const { lat, lng } = e.latlng;
-        L.popup()
+        const popup = L.popup()
           .setLatLng(e.latlng)
           .setContent(`
-            <div class="text-slate-950 font-sans p-2 min-w-[160px] leading-tight">
-              <div class="font-black text-[11px] uppercase text-slate-800 flex items-center gap-1">📍 MAP SELECTION</div>
+            <div class="text-slate-950 font-sans p-2 min-w-[170px] leading-tight">
+              <div class="font-black text-[11px] uppercase text-slate-800 flex items-center gap-1">📍 STORM CHASE TARGET</div>
               <p class="text-[10px] text-slate-500 font-mono mt-1 font-semibold">${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
+              
+              <div id="chase-probe-ui" class="my-2 min-h-[40px]">
+                <!-- Probe UI will be injected here by App.tsx -->
+              </div>
+
               <div class="mt-2.5 pt-2 border-t border-slate-100">
-                <button onclick="window.onMapSetCoordinates?.(${lat}, ${lng})" class="w-full px-2 py-1 bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-[9px] rounded uppercase cursor-pointer border-none shadow-sm transition-colors">
-                  Set GPS Gateway
+                <button onclick="window.onMapSetCoordinates?.(${lat}, ${lng})" class="w-full px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[9px] rounded uppercase cursor-pointer border-none shadow-sm transition-colors">
+                  Set As Primary Gateway
                 </button>
               </div>
             </div>
           `)
           .openOn(map);
-        });
+
+        // Immediately deploy the probe to fetch localized metrics for this spot
+        if (window.onStormChaseProbe) {
+          window.onStormChaseProbe(lat, lng);
+        }
+      });
       }
     } catch (e) {
       console.warn('Click/Hover listeners subscription failed:', e);

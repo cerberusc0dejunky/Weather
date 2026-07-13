@@ -453,8 +453,12 @@ export default function App() {
       setIsAnalyzingTelemetry(true);
       try {
         const cape = windyPointTelemetry?.cape || (telemetry?.temperatureC && telemetry?.dewpointC ? 1500 : 0);
-        const dewPoint = telemetry?.dewpointC ? (telemetry.dewpointC * 9/5) + 32 : 55;
-        const shearMph = telemetry?.windSpeedKmH ? telemetry.windSpeedKmH * 0.621371 : 15;
+        const dewPoint = telemetry?.dewpointC 
+          ? (telemetry.dewpointC * 9/5) + 32 
+          : (windyPointTelemetry?.dewpoint !== undefined ? windyPointTelemetry.dewpoint : 55);
+        const shearMph = telemetry?.windSpeedKmH 
+          ? telemetry.windSpeedKmH * 0.621371 
+          : (windyPointTelemetry?.wind !== undefined ? windyPointTelemetry.wind : 15);
 
         const result = await runMlInference({
           cape,
