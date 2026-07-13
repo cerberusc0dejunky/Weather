@@ -444,6 +444,7 @@ export default function App() {
 
   // Experimental Tornadogenesis Probability Analysis States
   const [tornadogenesisData, setTornadogenesisData] = useState<any | null>(null);
+  const [chaseTarget, setChaseTarget] = useState<any | null>(null);
   const [isAnalyzingTelemetry, setIsAnalyzingTelemetry] = useState<boolean>(false);
   const [isSyncingMl, setIsSyncingMl] = useState<boolean>(false);
 
@@ -659,6 +660,114 @@ export default function App() {
 
     const interval = setInterval(checkExpiredAlerts, 5000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Dynamically link Storm Chaser Probe to global window
+  useEffect(() => {
+    window.onStormChaseProbe = async (lat: number, lon: number) => {
+      setChaseTarget({ lat, lon, loading: true });
+      try {
+        const pointKey = localStorage.getItem('daisy-windy-point-key') || (import.meta as any).env?.VITE_WINDY_POINT_KEY;
+        if (!pointKey) {
+          triggerToast('Windy API Key required for Storm Chase Probe.', 'error');
+          setChaseTarget({ lat, lon, loading: false, error: true });
+          return;
+        }
+
+        const body = {
+          lat, lon, model: "gfs",
+          parameters: ["temp", "dewpoint", "wind", "gust", "pressure", "cape", "precip"],
+          levels: ["surface"], key: pointKey
+        };
+
+        const res = await fetch("https://api.windy.com/api/point-forecast/v2", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+        });
+
+        if (!res.ok) throw new Error("API failed");
+        const data = await res.json();
+        
+        const capeVal = data.cape?.["surface"]?.[0] || 0;
+        const dewVal = data.dewpoint?.["surface"]?.[0] || 285;
+        const windVal = data.wind?.["surface"]?.[0] || 5;
+        const dewPointF = (dewVal - 273.15) * 9/5 + 32;
+        const windMph = windVal * 2.23694;
+
+        const { runMlInference } = await import('./utils/mlEngine');
+        const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
+
+        setChaseTarget({
+          lat, lon, loading: false,
+          data: {
+            cape: Math.round(capeVal),
+            shear: Math.round(windMph),
+            dewpoint: Math.round(dewPointF),
+            tornadoProb: result ? result.tornadoProbability : 0,
+            downburstRisk: result ? result.downburstRisk : 0
+          }
+        });
+      } catch (err) {
+        setChaseTarget({ lat, lon, loading: false, error: true });
+      }
+    };
+    return () => { delete window.onStormChaseProbe; };
+  }, []);
+
+  // Dynamically link Storm Chaser Sync (Shift+Click) to global window
+  useEffect(() => {
+    window.onStormChaseSync = async (lat: number, lon: number) => {
+      triggerToast(`Scanning [${lat.toFixed(2)}, ${lon.toFixed(2)}]...`, 'info');
+      try {
+        const pointKey = localStorage.getItem('daisy-windy-point-key') || (import.meta as any).env?.VITE_WINDY_POINT_KEY;
+        if (!pointKey) {
+          triggerToast('Windy API Key required for Storm Chase Sync.', 'error');
+          return;
+        }
+
+        const body = {
+          lat, lon, model: "gfs",
+          parameters: ["temp", "dewpoint", "wind", "gust", "pressure", "cape", "precip"],
+          levels: ["surface"], key: pointKey
+        };
+
+        const res = await fetch("https://api.windy.com/api/point-forecast/v2", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+        });
+
+        if (!res.ok) throw new Error("API failed");
+        const data = await res.json();
+        
+        const capeVal = data.cape?.["surface"]?.[0] || 0;
+        const dewVal = data.dewpoint?.["surface"]?.[0] || 285;
+        const windVal = data.wind?.["surface"]?.[0] || 5;
+        const dewPointF = (dewVal - 273.15) * 9/5 + 32;
+        const windMph = windVal * 2.23694;
+
+        const { runMlInference } = await import('./utils/mlEngine');
+        const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
+
+        const syncData = {
+          timestamp: new Date().toISOString(),
+          location: `Chase Target: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+          cape: Math.round(capeVal),
+          shear: Math.round(windMph),
+          dewpoint: Math.round(dewPointF),
+          tornado_prob: result ? result.tornadoProbability : 0,
+          downburst_risk: result ? result.downburstRisk : 0,
+          active_alerts: "Target Sync"
+        };
+
+        const success = await syncToGoogleSheets([syncData]);
+        if (success) {
+          triggerToast(`Sent telemetry for [${lat.toFixed(2)}, ${lon.toFixed(2)}] to Sheets!`, 'success');
+        } else {
+          triggerToast(`Failed to sync [${lat.toFixed(2)}, ${lon.toFixed(2)}]. Check Webhook URL.`, 'error');
+        }
+      } catch (err) {
+        triggerToast(`Telemetry fetch failed for [${lat.toFixed(2)}, ${lon.toFixed(2)}]`, 'error');
+      }
+    };
+    return () => { delete window.onStormChaseSync; };
   }, []);
 
   // Perform purely local geometric calculations for discussions on coordinate or custom changes without redundant network requests
@@ -3449,6 +3558,78 @@ export default function App() {
           )}
         </section>
       </div>
+
+      {/* Storm Chaser Probe Panel */}
+      {chaseTarget && (
+        <div className="fixed top-0 right-0 h-full w-80 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-l border-slate-200 dark:border-slate-800 shadow-2xl z-[9999] p-6 flex flex-col transform transition-transform duration-300">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-white flex items-center gap-2">
+              <Compass className="w-4 h-4 text-cyan-500 animate-spin-slow" />
+              STORM CHASER
+            </h2>
+            <button onClick={() => setChaseTarget(null)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md">
+              <span className="text-slate-500 font-bold text-lg leading-none">&times;</span>
+            </button>
+          </div>
+          
+          <div className="text-[10px] font-mono text-slate-500 mb-6 border-b border-slate-200 dark:border-slate-800 pb-4">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+              TARGET: {chaseTarget.lat.toFixed(4)}, {chaseTarget.lon.toFixed(4)}
+            </div>
+          </div>
+
+          {chaseTarget.loading ? (
+            <div className="flex-grow flex flex-col items-center justify-center space-y-4">
+              <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-xs font-bold text-cyan-600 uppercase tracking-widest animate-pulse">PROBING ATMOSPHERE...</p>
+            </div>
+          ) : chaseTarget.error ? (
+            <div className="flex-grow flex flex-col items-center justify-center space-y-4 text-center">
+              <AlertOctagon className="w-12 h-12 text-rose-500" />
+              <p className="text-xs font-bold text-rose-500 uppercase tracking-widest">TELEMETRY FETCH FAILED</p>
+            </div>
+          ) : chaseTarget.data ? (
+            <div className="flex-grow space-y-6">
+              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Tornadogenesis</p>
+                <div className="flex items-end gap-2">
+                  <p className={`text-4xl font-black ${chaseTarget.data.tornadoProb > 30 ? 'text-rose-500' : 'text-cyan-600'}`}>
+                    {chaseTarget.data.tornadoProb}%
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Surface Instability</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-black text-slate-700 dark:text-white">{chaseTarget.data.cape} <span className="text-xs text-slate-500">J/kg</span></span>
+                  <Flame className={`w-5 h-5 ${chaseTarget.data.cape > 2000 ? 'text-amber-500' : 'text-slate-400'}`} />
+                </div>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Low-Level Shear</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-black text-slate-700 dark:text-white">{chaseTarget.data.shear} <span className="text-xs text-slate-500">MPH</span></span>
+                  <Wind className={`w-5 h-5 ${chaseTarget.data.shear > 40 ? 'text-indigo-500' : 'text-slate-400'}`} />
+                </div>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Dewpoint</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-black text-slate-700 dark:text-white">{chaseTarget.data.dewpoint} <span className="text-xs text-slate-500">°F</span></span>
+                  <Thermometer className="w-5 h-5 text-teal-500" />
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
+
     </div>
   );
 }
+
+export default App;

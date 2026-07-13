@@ -131,6 +131,7 @@ declare global {
     L?: any;
     onMapSetCoordinates?: (lat: number, lon: number) => void;
     onStormChaseProbe?: (lat: number, lon: number) => void;
+    onStormChaseSync?: (lat: number, lon: number) => void;
   }
 }
 
@@ -540,6 +541,12 @@ export default function RadarMap({
 
       map.on('click', (e: any) => {
         const { lat, lng } = e.latlng;
+        
+        if (e.originalEvent.shiftKey && window.onStormChaseSync) {
+          window.onStormChaseSync(lat, lng);
+          return;
+        }
+
         const popup = L.popup()
           .setLatLng(e.latlng)
           .setContent(`
