@@ -497,6 +497,8 @@ export default function App() {
       await syncToGoogleSheets({
         latitude: currentLat,
         longitude: currentLon,
+        lat: currentLat,
+        lon: currentLon,
         alerts,
         rotationPins,
         telemetry,
