@@ -2359,7 +2359,7 @@ function App() {
   })();
 
   return (
-    <div className={`min-h-screen flex flex-col text-slate-900 dark:text-slate-100 ${settings.flash && isAnyDirectHitWarningActive ? 'flash-active-severe' : 'bg-slate-50 dark:bg-slate-950'} transition-colors duration-300`}>
+    <main className={`min-h-screen flex flex-col text-slate-900 dark:text-slate-100 ${settings.flash && isAnyDirectHitWarningActive ? 'flash-active-severe' : 'bg-slate-50 dark:bg-slate-950'} transition-colors duration-300`}>
       {/* Geolocation Modal Engagement */}
       {showLocationModal && (
         <Suspense fallback={null}>
@@ -3626,7 +3626,7 @@ function App() {
         </div>
       )}
 
-    </div>
+    </main>
   );
 }
 

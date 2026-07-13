@@ -1221,7 +1221,7 @@ export default function RadarMap({
             onClick={() => transitionMapMode('radar')}
             className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${
               mapMode === 'radar'
-                ? 'bg-slate-100 dark:bg-slate-855 border border-neon-aqua/20 dark:border-neon-aqua/40 text-cyan-600 dark:text-neon-aqua shadow-[0_0_8px_rgba(0,255,255,0.15)] dark:shadow-[0_0_8px_rgba(0,255,255,0.2)]'
+                ? 'bg-slate-100 dark:bg-slate-855 border border-neon-aqua/20 dark:border-neon-aqua/40 text-cyan-700 dark:text-neon-aqua shadow-[0_0_8px_rgba(0,255,255,0.15)] dark:shadow-[0_0_8px_rgba(0,255,255,0.2)]'
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
             }`}
           >
@@ -1234,7 +1234,7 @@ export default function RadarMap({
             onClick={() => transitionMapMode('wind')}
             className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${
               mapMode === 'wind'
-                ? 'bg-slate-100 dark:bg-slate-850 border border-neon-pink/20 dark:border-neon-pink/40 text-rose-500 dark:text-neon-pink shadow-[0_0_8px_rgba(255,105,180,0.15)] dark:shadow-[0_0_8px_rgba(255,105,180,0.2)]'
+                ? 'bg-slate-100 dark:bg-slate-850 border border-neon-pink/20 dark:border-neon-pink/40 text-rose-600 dark:text-neon-pink shadow-[0_0_8px_rgba(255,105,180,0.15)] dark:shadow-[0_0_8px_rgba(255,105,180,0.2)]'
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
             }`}
           >
@@ -1325,7 +1325,7 @@ export default function RadarMap({
               value={addressSearchQuery}
               onChange={(e) => setAddressSearchQuery(e.target.value)}
               placeholder="Search location/radar..."
-              className="bg-transparent border-none text-white text-[10px] placeholder-slate-500 focus:outline-none w-full sm:w-40 font-bold uppercase tracking-wider"
+              className="bg-transparent border-none text-white text-[10px] placeholder-slate-500 focus:outline-none w-full sm:w-40 font-bold uppercase tracking-wider py-1.5 px-2"
               disabled={isSearching}
             />
             {isSearching ? (
