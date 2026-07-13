@@ -68,6 +68,7 @@ export interface SystemSettings {
   flash: boolean;
   monitorRadius: number;
   telemetryDebug?: boolean;
+  highContrast?: boolean;
 }
 
 export interface MesoscaleDiscussion {

@@ -158,6 +158,50 @@ h3, h4 {
   background: var(--border-color);
   border-radius: 3px;
 }
+
+/* Map container rounding */
+.leaflet-container {
+  border-radius: 3px;
+}
+
+/* 
+==================================================
+   ACCESSIBILITY: HIGH CONTRAST MODE OVERRIDES
+==================================================
+*/
+body.a11y-high-contrast {
+  /* Enforce WCAG AA minimum 4.5:1 contrast for all text */
+  --tw-text-opacity: 1 !important;
+  color: #000000 !important;
+}
+
+body.a11y-high-contrast .dark {
+  color: #ffffff !important;
+}
+
+body.a11y-high-contrast .text-slate-400,
+body.a11y-high-contrast .text-slate-500,
+body.a11y-high-contrast .text-cyan-600,
+body.a11y-high-contrast .text-cyan-500 {
+  color: #0f172a !important; /* Dark slate */
+  font-weight: 900 !important;
+}
+
+.dark body.a11y-high-contrast .dark\:text-slate-400,
+.dark body.a11y-high-contrast .dark\:text-slate-500,
+.dark body.a11y-high-contrast .dark\:text-cyan-600,
+.dark body.a11y-high-contrast .dark\:text-cyan-500,
+.dark body.a11y-high-contrast .dark\:text-neon-aqua {
+  color: #ffffff !important;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.8) !important;
+}
+
+body.a11y-high-contrast button {
+  border: 2px solid #000 !important;
+}
+.dark body.a11y-high-contrast button {
+  border: 2px solid #fff !important;
+}
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
 }

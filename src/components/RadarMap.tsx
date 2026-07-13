@@ -475,7 +475,7 @@ export default function RadarMap({
           .setLatLng(e.latlng)
           .setContent(`
             <div class="text-slate-950 font-sans p-2 min-w-[160px] leading-tight">
-              <h5 class="font-black text-[11px] uppercase text-slate-800 flex items-center gap-1">📍 MAP SELECTION</h5>
+              <div class="font-black text-[11px] uppercase text-slate-800 flex items-center gap-1">📍 MAP SELECTION</div>
               <p class="text-[10px] text-slate-500 font-mono mt-1 font-semibold">${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
               <div class="mt-2.5 pt-2 border-t border-slate-100">
                 <button onclick="window.onMapSetCoordinates?.(${lat}, ${lng})" class="w-full px-2 py-1 bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-[9px] rounded uppercase cursor-pointer border-none shadow-sm transition-colors">
@@ -534,7 +534,7 @@ export default function RadarMap({
 
         const m = L.marker([asset.lat, asset.lon], { icon: assetDivIcon })
           .addTo(map)
-          .bindPopup(`<div class="text-slate-950"><h4 class="font-extrabold font-sans text-xs uppercase">${asset.name}</h4><p class="text-[10px] font-mono mt-1">lat/lon: ${asset.lat.toFixed(3)}, ${asset.lon.toFixed(3)}</p></div>`);
+          .bindPopup(`<div class="text-slate-950"><div class="font-extrabold font-sans text-xs uppercase">${asset.name}</div><p class="text-[10px] font-mono mt-1">lat/lon: ${asset.lat.toFixed(3)}, ${asset.lon.toFixed(3)}</p></div>`);
         assetMarkersRef.current.push(m);
       });
 
@@ -561,7 +561,7 @@ export default function RadarMap({
           },
         })
           .addTo(map)
-          .bindPopup(`<div class="text-slate-950 font-sans p-1"><h4 class="font-black text-xs uppercase text-red-600">${alert.event}</h4><p class="text-[10px] mt-1 text-slate-700 leading-tight">${alert.areaDesc}</p></div>`);
+          .bindPopup(`<div class="text-slate-950 font-sans p-1"><div class="font-black text-xs uppercase text-red-600">${alert.event}</div><p class="text-[10px] mt-1 text-slate-700 leading-tight">${alert.areaDesc}</p></div>`);
 
         polygonLayersRef.current.push(layer);
       });
@@ -677,7 +677,7 @@ export default function RadarMap({
             .addTo(map)
             .bindPopup(`
               <div class="text-slate-950 font-sans p-1.5 max-w-[200px]">
-                <h5 class="font-extrabold text-xs text-rose-600 uppercase flex items-center gap-1">
+                <div class="font-extrabold text-xs text-rose-600 uppercase flex items-center gap-1">
                   <Compass className="w-3.5 h-3.5" /> Track Milestone
                 </h5>
                 <p class="text-[10px] mt-1 text-slate-700 leading-snug">
@@ -722,7 +722,7 @@ export default function RadarMap({
 
             connectionLine.bindPopup(`
               <div class="text-slate-950 font-sans p-1.5 max-w-[220px]">
-                <h5 class="font-extrabold text-xs text-cyan-600 dark:text-cyan-700 uppercase flex items-center gap-1">
+                <div class="font-extrabold text-xs text-cyan-700 uppercase flex items-center gap-1">
                   🎯 Collision Path: ${asset.name}
                 </h5>
                 <p class="text-[10px] mt-1 text-slate-700 leading-snug font-medium">
@@ -765,9 +765,9 @@ export default function RadarMap({
               .addTo(map)
               .bindPopup(`
                 <div class="text-slate-950 font-sans p-1.5 max-w-[220px]">
-                  <h5 class="font-extrabold text-xs text-cyan-600 dark:text-cyan-700 uppercase">
+                  <div class="font-extrabold text-xs text-cyan-700 uppercase">
                     ETA Timeline Tracker
-                  </h5>
+                  </div>
                   <p class="text-[10px] mt-1 text-slate-700 leading-tight">
                     Estimated storm core arrival at <b>${asset.name}</b> in approximately <b>${assetEta} minutes</b>.
                   </p>
@@ -816,7 +816,7 @@ export default function RadarMap({
                   ${threatBadgeText} THREAT
                 </span>
               </div>
-              <h4 class="font-extrabold text-xs uppercase text-slate-900 leading-tight">${alert.event}</h4>
+              <div class="font-extrabold text-xs uppercase text-slate-900 leading-tight">${alert.event}</div>
               <p class="text-[9px] font-semibold text-slate-500 mt-1 uppercase">Distance: ${alert.minDist === 0 ? 'Direct Hit' : `${alert.minDist.toFixed(1)} miles`}</p>
               <p class="text-[9px] text-slate-600 mt-1.5 leading-snug font-medium line-clamp-3">${alert.areaDesc}</p>
             </div>
@@ -915,7 +915,7 @@ export default function RadarMap({
                 ${popupSubTitle}
               </span>
             </div>
-            <h4 class="font-extrabold text-xs uppercase text-slate-900 leading-tight">${pin.eventName}</h4>
+            <div class="font-extrabold text-xs uppercase text-slate-900 leading-tight">${pin.eventName}</div>
             <p class="text-[9px] font-semibold text-slate-500 mt-1 uppercase">BOUNDARIES: ${pin.areaDesc}</p>
             
             <div class="mt-2 p-2 bg-slate-50 border border-slate-150 rounded-lg">
@@ -956,7 +956,7 @@ export default function RadarMap({
           })
             .addTo(map)
             .bindPopup(`<div class="text-slate-950 font-sans p-1">
-              <h4 class="font-black text-xs uppercase text-amber-600">SPC Mesoscale Discussion #${md.number}</h4>
+              <div class="font-black text-xs uppercase text-amber-600">SPC Mesoscale Discussion #${md.number}</div>
               <p class="text-[10px] uppercase font-bold text-slate-500 mt-1">Probability of Watch: ${md.probability}%</p>
               <p class="text-[10px] mt-1 text-slate-700 leading-tight"><b>Areas:</b> ${md.areasAffected}</p>
             </div>`);
@@ -986,7 +986,7 @@ export default function RadarMap({
                   </span>
                   <span class="text-[8px] font-black uppercase text-slate-400 font-mono">Index: ${(spot.intensity * 100).toFixed(0)}%</span>
                 </div>
-                <h4 class="font-black text-xs uppercase text-slate-900">${spot.label}</h4>
+                <div class="font-black text-xs uppercase text-slate-900">${spot.label}</div>
                 <p class="text-[9px] text-slate-500 mt-1 font-mono leading-tight">Average density: <b>${spot.count} severe warnings / year</b></p>
                 <p class="text-[9px] text-rose-700 mt-1.5 font-sans font-bold uppercase leading-none">⚠️ High Warning Recurrence Zone</p>
               </div>

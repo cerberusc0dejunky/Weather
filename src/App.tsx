@@ -402,6 +402,7 @@ export default function App() {
     flash: true,
     monitorRadius: 25,
     telemetryDebug: false,
+    highContrast: false,
   });
 
   // Custom user-managed API keys
@@ -1886,12 +1887,9 @@ export default function App() {
         setSearchQuery('');
         setCurrentLat(latVal);
         setCurrentLon(lonVal);
-        
-        // Instant trigger refresh
-        setTimeout(() => {
-          fetchNationalAlerts();
-          fetchTelemetry(latVal, lonVal);
-        }, 100);
+        setCurrentLat(latVal);
+        setCurrentLon(lonVal);
+
       } else {
         triggerToast('Location pattern unmatched. Please try closer zip codes or US cities.', 'error');
       }
@@ -2646,14 +2644,35 @@ export default function App() {
                 </span>
               </label>
 
+              {/* High Contrast Toggle */}
+              <label className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.highContrast}
+                  onChange={(e) => {
+                    setSettings((s) => ({ ...s, highContrast: e.target.checked }));
+                    if (e.target.checked) {
+                      document.body.classList.add('a11y-high-contrast');
+                    } else {
+                      document.body.classList.remove('a11y-high-contrast');
+                    }
+                  }}
+                  className="w-4 h-4 accent-amber-600 dark:accent-amber-400 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
+                />
+                <span className="flex items-center gap-1">
+                  <Activity className="w-3.5 h-3.5 text-amber-500" />
+                  High Contrast
+                </span>
+              </label>
+
 
 
               {/* Monitor Radius Slider */}
               <div className="flex items-center gap-3 border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800 pt-3 md:pt-0 pl-0 md:pl-5 w-full md:w-auto">
-                <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 select-none shrink-0">
+                <label htmlFor="settings-radius" className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 select-none shrink-0 cursor-pointer">
                   <Compass className="w-3.5 h-3.5 text-cyan-500 dark:text-neon-aqua" />
                   Monitor Radius
-                </span>
+                </label>
                 <input
                   type="range"
                   id="settings-radius"
@@ -2735,6 +2754,7 @@ export default function App() {
                 <div className="flex flex-col md:flex-row gap-5 items-start">
                   {/* Add Coordinates Search Input */}
                   <div className="w-full md:w-1/3 relative shrink-0">
+                    <label htmlFor="searchQuery" className="sr-only">Search location by City, Zip, or Address</label>
                     <input
                       type="text"
                       id="searchQuery"

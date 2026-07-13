@@ -1,0 +1,21 @@
+# D.A.I.S.Y. (Data Acquisition & Integrated System for Yields)
+
+## Overview
+D.A.I.S.Y. is a React-based Progressive Web App (PWA) designed for high-frequency severe weather telemetry tracking. It ingests data from the National Weather Service (NWS) API and Windy Point Forecasts to monitor thermodynamics and kinematics related to tornadogenesis and severe convective storms.
+
+## Core Technologies
+- React 19 / TypeScript
+- Vite / Tailwind CSS
+- Leaflet (@turf/turf) for spatial analysis
+- Google Gemini API for local ML heuristic analysis
+
+## Key Components
+- **App.tsx**: Central controller, state management, and primary telemetry ingestion loop.
+- **RadarMap.tsx**: Interactive Leaflet map rendering NWS warning polygons, base reflectivity radar, and user-defined anchor points.
+- **GeolocationModal.tsx**: Handles initial user consent and browser geolocation API access.
+- **AlertHistory.tsx**: Chronological log of intercepted NWS alerts and Mesoscale Discussions.
+
+## Architecture Guidelines
+- Ensure "Direct-to-Source" polling (do not cache weather.gov or openstreetmap.org in the Service Worker).
+- All API requests to NWS must include the specific User-Agent `(DAISY Storm Tracker App, cerberus@c0dejunky.com)`.
+- Geometric calculations are offloaded to Turf.js.
