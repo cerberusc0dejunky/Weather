@@ -165,6 +165,7 @@ export async function compileModel(
 export interface MlInferenceResult {
   tornadoProbability: number;
   downburstRisk: 'None' | 'Moderate' | 'High' | 'Extreme';
+  diagnosticReflection?: string;
 }
 
 export async function runMlInference(inputs: {
@@ -172,6 +173,7 @@ export async function runMlInference(inputs: {
   dewPoint: number;
   shearMph: number;
   rotationPins?: RotationPin[];
+  chaserReports?: import('../types').ChaserReport[];
 }): Promise<MlInferenceResult | null> {
   // We can always run it, if not compiled just auto-compile or act as deterministic formula
   if (!isCompiled) {
@@ -230,17 +232,43 @@ export async function runMlInference(inputs: {
     collapsePenalty = Math.min(0.5, capeFactor * shearDeficit); 
   }
 
+  let chaserScore = 0;
+  let chaserTornadoConfirmed = false;
+
+  const reports = Array.isArray(inputs.chaserReports) ? inputs.chaserReports : [];
+  reports.forEach(report => {
+    if (report.tornadoOnGround) {
+      chaserTornadoConfirmed = true;
+      chaserScore += 1.0;
+    } else if (report.rotationVisible) {
+      chaserScore += 0.5;
+    } else if (report.wallCloud) {
+      chaserScore += 0.3;
+    }
+  });
+
   // Calculate raw score and subtract the downburst collapse penalty
-  let rawScore = (normCape * wCape + normDp * wDp + normShear * wShear) + (rotationScore * 0.4);
+  let rawScore = (normCape * wCape + normDp * wDp + normShear * wShear) + (rotationScore * 0.4) + chaserScore;
   rawScore -= collapsePenalty;
   
   const probability = 1 / (1 + Math.exp(-10 * (rawScore - 0.55)));
-  const finalProbability = Math.min(100, Math.max(0, Math.round(probability * 100)));
+  let finalProbability = Math.min(100, Math.max(0, Math.round(probability * 100)));
   
   let downburstRisk: 'None' | 'Moderate' | 'High' | 'Extreme' = 'None';
   if (collapsePenalty > 0.4) downburstRisk = 'Extreme';
   else if (collapsePenalty > 0.25) downburstRisk = 'High';
   else if (collapsePenalty > 0.1) downburstRisk = 'Moderate';
 
-  return { tornadoProbability: finalProbability, downburstRisk };
+  let diagnosticReflection: string | undefined;
+
+  // ML Investigative Reflection: Did the API miss this?
+  if (chaserTornadoConfirmed && finalProbability < 80) {
+     // The chaser confirmed a tornado, but the API telemetry was weak.
+     diagnosticReflection = "Investigative Reflection: A Storm Chaser reported a tornado on the ground, but ambient API telemetry did not predict it. Investigating potential API data lag or microclimate shear spikes not captured by the grid.";
+     finalProbability = 99; // Override probability because ground-truth is king
+  } else if (chaserTornadoConfirmed) {
+     finalProbability = 99; // Ground truth overrides all formulas
+  }
+
+  return { tornadoProbability: finalProbability, downburstRisk, diagnosticReflection };
 }

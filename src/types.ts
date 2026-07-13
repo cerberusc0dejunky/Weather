@@ -112,4 +112,22 @@ export interface NetworkRequestLog {
   suggestedAction?: string;
 }
 
+export interface StormChaserProfile {
+  email: string;
+  isVerified: boolean;
+  tags: string[]; // e.g., ['stormchaser']
+}
 
+export interface ChaserReport {
+  id: string;
+  reporterEmail: string;
+  timestamp: string;
+  lat: number;
+  lon: number;
+  wallCloud: boolean;
+  rotationVisible: boolean; // Ground-truth for velocityCoupletPersistentShear
+  tornadoOnGround: boolean; // Ground-truth for tornadoDebrisSignatureTDS
+  windGustMph?: number;
+  hailSizeInches?: number;
+  notes?: string;
+}

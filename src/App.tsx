@@ -3172,16 +3172,6 @@ function App() {
                     </p>
                   </div>
                 </div>
-
-                <div className="mt-6 flex justify-end border-t border-slate-200 dark:border-slate-800 pt-4">
-                  <button
-                    onClick={() => handleSyncMl(false)}
-                    disabled={isSyncingMl}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] tracking-wider uppercase rounded-xl transition-all disabled:opacity-50 shadow-sm"
-                  >
-                    {isSyncingMl ? 'Syncing...' : 'Sync ML Snapshot to Sheets'}
-                  </button>
-                </div>
               </div>
             ) : (
               <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-600 font-mono text-[9px] uppercase text-center rounded-xl">
