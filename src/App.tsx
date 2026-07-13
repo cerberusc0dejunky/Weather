@@ -216,7 +216,7 @@ function PressureBaroTooltip({ active, payload }: PressureTooltipProps) {
   if (active && payload && payload.length) {
     return (
       <div className="bg-slate-950 text-slate-100 border border-slate-800 p-2.5 rounded-xl shadow-xl text-[10px] font-mono whitespace-nowrap">
-        <div className="font-bold text-slate-400">TIME: {payload[0].payload.time}</div>
+        <div className="font-bold text-slate-600">TIME: {payload[0].payload.time}</div>
         <div className="text-cyan-400 dark:text-cyan-400 font-black mt-0.5">
           PRES: {payload[0].value.toFixed(2)} InHg
         </div>
@@ -2168,7 +2168,7 @@ export default function App() {
     let status = 'Trend: Stable';
     let statusDesc = 'Approaching storms are highly likely to weaken, dissipate, or split and go around your selected locations due to low atmospheric fuel.';
     let bypassChance = 'High (80% - 90% Bypass)';
-    let badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400';
+    let badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400';
     let textColor = 'text-emerald-700 dark:text-emerald-400';
     let shadowColor = 'shadow-[0_4px_20px_rgba(16,185,129,0.05)]';
     let trendLabel = 'Stable Atmosphere / Storm Dissipation Mode';
@@ -2207,7 +2207,7 @@ export default function App() {
       status = 'Trend: Stabilizing';
       statusDesc = 'Pressure is rising or CAPE indices are actively cooling down, indicating the storm engine is choked of convective potential. Incoming cells are expected to weaken or decay.';
       bypassChance = 'High (70% - 85% Bypass)';
-      badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400';
+      badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400';
       textColor = 'text-emerald-700 dark:text-emerald-400';
       shadowColor = 'shadow-[0_4px_20px_rgba(16,185,129,0.05)]';
       trendLabel = 'Positive Pressure Drift / Convective Decay';
@@ -2263,7 +2263,7 @@ export default function App() {
             <h2 className="text-xl font-black mb-1 font-sans tracking-tight uppercase text-white flex items-center gap-2">
               <Download className="w-5 h-5 text-neon-aqua" /> SAVE TO HOME OR WINDOWS
             </h2>
-            <p className="text-xs text-slate-400 mb-6 font-medium">
+            <p className="text-xs text-slate-600 mb-6 font-medium">
               Install D.A.I.S.Y. directly to your device for instant offline access and standalone storm monitoring.
             </p>
 
@@ -2343,7 +2343,7 @@ export default function App() {
                   <strong>Transient State Session Limit:</strong> D.A.I.S.Y. stores monitored locations and severe weather tracking states strictly inside temporary sandboxed browser memory. Reloading or refreshing will cycle this state and reset all active alarms.
                 </p>
               </div>
-              <p className="text-[10px] text-slate-400 font-medium">
+              <p className="text-[10px] text-slate-600 font-medium">
                 This is a secondary tracking asset. Do not rely solely on this app for immediate life-safety choices in critical situations. Precise GPS base location is required.
               </p>
             </div>
@@ -2412,11 +2412,11 @@ export default function App() {
             D.A.I.S.Y.
           </h1>
           
-          <p className="text-slate-400 font-mono text-xs tracking-widest uppercase mb-4">
+          <p className="text-slate-600 font-mono text-xs tracking-widest uppercase mb-4">
             Data Acquisition & Integrated System for Yields
           </p>
 
-          <p className="text-slate-500 font-semibold max-w-sm text-sm leading-relaxed mb-8">
+          <p className="text-slate-600 font-semibold max-w-sm text-sm leading-relaxed mb-8">
             Severe convective tracking and radar analysis gateway. Establishes localized siren sirens and trajectory tracking boundaries.
           </p>
 
@@ -2443,12 +2443,12 @@ export default function App() {
           )}
 
           {/* Secure Client Sandbox Disclaimers & Session Risk Information */}
-          <div className="mt-8 max-w-md border border-slate-800 bg-slate-900/60 backdrop-blur-md rounded-2xl p-5 text-left text-xs text-slate-400 space-y-3 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+          <div className="mt-8 max-w-md border border-slate-800 bg-slate-900/60 backdrop-blur-md rounded-2xl p-5 text-left text-xs text-slate-600 space-y-3 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
             <div className="flex items-start gap-3">
-              <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+              <ShieldCheck className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
               <div>
                 <h2 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Data Protection Disclosure</h2>
-                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-400">
+                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-600">
                   D.A.I.S.Y. prioritizes private-by-default workflows. Geolocated coordinates, monitored secure spots, and historical alert profiles are calculated and kept exclusively inside your local browser storage. No user positions, network traces, or tracking files are sent, shared, or maintained by external cloud bases.
                 </p>
               </div>
@@ -2458,7 +2458,7 @@ export default function App() {
               <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
               <div>
                 <h2 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Transient Session state Limit</h2>
-                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-400">
+                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-600">
                   This application functions as a high-frequency telemetry workspace. Reloading or refreshing your browser session forces a complete security clearance and state cycle. If you reload, you must reactivate alarms and grant GPS safety permissions again.
                 </p>
               </div>
@@ -2476,7 +2476,7 @@ export default function App() {
             {notificationToast.type === 'error' ? (
               <AlertOctagon className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
             ) : notificationToast.type === 'success' ? (
-              <ShieldCheck className="w-5 h-5 text-emerald-500 dark:text-neon-aqua shrink-0 mt-0.5" />
+              <ShieldCheck className="w-5 h-5 text-emerald-700 dark:text-neon-aqua shrink-0 mt-0.5" />
             ) : (
               <Info className="w-5 h-5 text-cyan-500 shrink-0 mt-0.5" />
             )}
@@ -2485,7 +2485,7 @@ export default function App() {
             </div>
             <button 
               onClick={() => setNotificationToast(null)}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-white shrink-0 font-bold p-0.5"
+              className="text-slate-600 hover:text-slate-600 dark:hover:text-white shrink-0 font-bold p-0.5"
               aria-label="Close notification"
             >
               ×
@@ -2529,7 +2529,7 @@ export default function App() {
               <h1 className="text-3xl md:text-4xl font-black tracking-tight leading-none uppercase text-transparent bg-clip-text bg-gradient-to-r from-neon-pink to-neon-aqua dark:text-white dark:bg-none dark:neon-text-glow">
                 D.A.I.S.Y.
               </h1>
-              <p className="text-[10px] font-black font-mono text-cyan-600 dark:text-neon-aqua uppercase tracking-[0.25em] mt-2">
+              <p className="text-[10px] font-black font-mono text-cyan-700 dark:text-neon-aqua uppercase tracking-[0.25em] mt-2">
                 Convective Proximity System
               </p>
             </div>
@@ -2575,7 +2575,7 @@ export default function App() {
                 <button
                   id="install-pwa-btn"
                   onClick={handlePwaInstall}
-                  className="px-5 py-2.5 bg-white dark:bg-slate-950 border border-neon-aqua text-cyan-600 dark:text-neon-aqua rounded-full text-[10px] font-black uppercase tracking-wider hover:bg-neon-aqua hover:text-slate-950 shadow-[0_0_12px_rgba(0,255,255,0.3)] transition-all cursor-pointer flex items-center justify-center gap-1.5 animate-bounce"
+                  className="px-5 py-2.5 bg-white dark:bg-slate-950 border border-neon-aqua text-cyan-700 dark:text-neon-aqua rounded-full text-[10px] font-black uppercase tracking-wider hover:bg-neon-aqua hover:text-slate-950 shadow-[0_0_12px_rgba(0,255,255,0.3)] transition-all cursor-pointer flex items-center justify-center gap-1.5 animate-bounce"
                 >
                   <Download className="w-3.5 h-3.5" /> Install DAISY
                 </button>
@@ -2596,7 +2596,7 @@ export default function App() {
                   className="w-4 h-4 accent-neon-pink bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
                 />
                 <span className="flex items-center gap-1">
-                  {settings.audio ? <Volume2 className="w-3.5 h-3.5 text-neon-pink" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />}
+                  {settings.audio ? <Volume2 className="w-3.5 h-3.5 text-neon-pink" /> : <VolumeX className="w-3.5 h-3.5 text-slate-600 dark:text-slate-600" />}
                   Audio Siren
                 </span>
               </label>
@@ -2611,7 +2611,7 @@ export default function App() {
                   className="w-4 h-4 accent-neon-aqua bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
                 />
                 <span className="flex items-center gap-1">
-                  {settings.vibrate ? <Vibrate className="w-3.5 h-3.5 text-cyan-600 dark:text-neon-aqua" /> : <VibrateOff className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />}
+                  {settings.vibrate ? <Vibrate className="w-3.5 h-3.5 text-cyan-700 dark:text-neon-aqua" /> : <VibrateOff className="w-3.5 h-3.5 text-slate-600 dark:text-slate-600" />}
                   Haptic Pulse
                 </span>
               </label>
@@ -2685,7 +2685,7 @@ export default function App() {
                   onChange={(e) => setSettings((s) => ({ ...s, monitorRadius: parseInt(e.target.value, 10) }))}
                   className="w-full md:w-28 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 dark:accent-neon-aqua"
                 />
-                <span className="text-[10px] font-black font-mono text-cyan-600 dark:text-neon-aqua bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-2 py-0.5 rounded shadow-sm shrink-0">
+                <span className="text-[10px] font-black font-mono text-cyan-700 dark:text-neon-aqua bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-2 py-0.5 rounded shadow-sm shrink-0">
                   {settings.monitorRadius} mi
                 </span>
               </div>
@@ -2696,15 +2696,15 @@ export default function App() {
               <div
                 className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase border tracking-wider bg-white dark:bg-slate-950 ${
                   connectionOnline
-                    ? 'text-emerald-600 dark:text-emerald-500 border-emerald-200 dark:border-emerald-900/60 shadow-sm'
+                    ? 'text-emerald-700 dark:text-emerald-700 border-emerald-200 dark:border-emerald-900/60 shadow-sm'
                     : 'text-red-500 border-red-200 dark:border-red-950/60 shadow-sm'
                 }`}
               >
                 <span className={`w-2 h-2 rounded-full inline-block ${connectionOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
                 {connectionOnline ? 'Telemetry Active' : 'Offline'}
               </div>
-              <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center">
-                <Clock className="w-3 h-3 mr-1 text-slate-400 dark:text-slate-600" />
+              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-600 uppercase tracking-widest flex items-center">
+                <Clock className="w-3 h-3 mr-1 text-slate-600 dark:text-slate-600" />
                 {syncStatus}
               </span>
             </div>
@@ -2748,8 +2748,8 @@ export default function App() {
           <div className="w-full">
             <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="Coordinates Manager">
               <div>
-                <h2 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                  <MapPin className="w-4 h-4 text-cyan-600 dark:text-neon-aqua" />
+                <h2 className="text-slate-600 dark:text-slate-600 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-cyan-700 dark:text-neon-aqua" />
                   Monitored Coordinates Anchor
                 </h2>
 
@@ -2772,7 +2772,7 @@ export default function App() {
                     <button
                       onClick={handleAddNewPin}
                       disabled={searching}
-                      className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
+                      className="absolute right-2.5 top-2 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-600 hover:text-neon-aqua rounded-lg shrink-0 cursor-pointer transition-colors disabled:opacity-50"
                       aria-label="Add location pin"
                     >
                       <Plus className="w-4 h-4" />
@@ -2782,7 +2782,7 @@ export default function App() {
                   {/* Active Selected Coordinates List */}
                   <div className="w-full md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
                     {assets.length === 0 ? (
-                      <div className="col-span-full p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[10px] font-mono font-extrabold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                      <div className="col-span-full p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[10px] font-mono font-extrabold tracking-widest text-slate-600 dark:text-slate-600 uppercase">
                         No active tracking anchors
                       </div>
                     ) : (
@@ -2807,7 +2807,7 @@ export default function App() {
                                 <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
                               )}
                             </span>
-                            <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-slate-500 block mt-0.5">
+                            <span className="text-[9px] font-mono font-bold text-slate-600 dark:text-slate-600 block mt-0.5">
                               LAT: {asset.lat.toFixed(3)}, LON: {asset.lon.toFixed(3)}
                             </span>
                           </div>
@@ -2834,8 +2834,8 @@ export default function App() {
           {/* 3. Ground Surface Air Telemetry (NWS ASOS) & Local Forecast trends (Unified ASOS & Bypass Dashboard) */}
           <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col justify-between" aria-label="NWS Telemetry and Forecast Microclimate Analysis">
             <div>
-              <h2 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+              <h2 className="text-slate-600 dark:text-slate-600 text-xs font-black uppercase tracking-wider mb-4 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-700 dark:text-neon-aqua animate-pulse" />
                 Ground Surface Air Telemetry (NWS ASOS) & Local Microclimate Trends
               </h2>
               
@@ -2846,8 +2846,8 @@ export default function App() {
                   {pressureHistory && pressureHistory.length > 0 && (
                     <div className="mt-3 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-950/40 transition-colors">
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5 mb-2">
-                        <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1 font-sans">
-                          <Gauge className="w-3 h-3 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                        <span className="text-[9px] font-black uppercase text-slate-600 dark:text-slate-600 tracking-wider flex items-center gap-1 font-sans">
+                          <Gauge className="w-3 h-3 text-cyan-700 dark:text-neon-aqua animate-pulse" />
                           Barometric Decay (Last 6 Polls)
                         </span>
                         {pressureHistory.length >= 2 && (
@@ -2906,7 +2906,7 @@ export default function App() {
                   )}
                 </>
               ) : (
-                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[9px] uppercase text-center rounded-xl">
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-600 font-mono text-[9px] uppercase text-center rounded-xl">
                   Synchronizing closest station observational grids...
                 </div>
               )}
@@ -2921,7 +2921,7 @@ export default function App() {
                   <Flame className="w-5 h-5 text-orange-500 animate-pulse" />
                   Convective Tornadogenesis Model (EXPERIMENTAL)
                 </h2>
-                <p className="text-[9px] sm:text-[10px] font-mono uppercase tracking-widest text-slate-400 dark:text-slate-500 mt-1 font-extrabold pb-1 border-b border-slate-100 dark:border-slate-800">
+                <p className="text-[9px] sm:text-[10px] font-mono uppercase tracking-widest text-slate-600 dark:text-slate-600 mt-1 font-extrabold pb-1 border-b border-slate-100 dark:border-slate-800">
                   Thermodynamic AI Solver & Atmospheric Telemetry Core
                 </p>
               </div>
@@ -2931,7 +2931,7 @@ export default function App() {
             {isAnalyzingTelemetry ? (
               <div className="py-12 flex flex-col items-center justify-center gap-3">
                 <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-[10px] sm:text-xs font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold animate-pulse">
+                <p className="text-[10px] sm:text-xs font-mono uppercase tracking-wider text-slate-600 dark:text-slate-600 font-bold animate-pulse">
                   Querying dynamic atmospheric solver columns...
                 </p>
               </div>
@@ -2966,7 +2966,7 @@ export default function App() {
                       <span className="text-2xl font-black font-mono leading-none">
                         {tornadogenesisData.genesis_probability_pct}%
                       </span>
-                      <span className="text-[7.5px] font-black uppercase text-slate-400 block tracking-widest mt-0.5">
+                      <span className="text-[7.5px] font-black uppercase text-slate-600 block tracking-widest mt-0.5">
                         TORNADO PROB
                       </span>
                     </div>
@@ -2974,7 +2974,7 @@ export default function App() {
 
                   {/* Summary Text description */}
                   <div className="text-center space-y-2 flex flex-col items-center">
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 leading-none">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-600 dark:text-slate-600 leading-none">
                       AI Diagnostic Assessment
                     </h3>
                     <p className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 leading-relaxed">
@@ -3013,7 +3013,7 @@ export default function App() {
                   <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <Thermometer className="w-4 h-4 text-rose-500" />
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 font-mono">
                         1. Low-level Moisture
                       </span>
                     </div>
@@ -3026,7 +3026,7 @@ export default function App() {
                   <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <Gauge className="w-4 h-4 text-amber-500" />
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 font-mono">
                         2. Atmospheric Instability
                       </span>
                     </div>
@@ -3039,7 +3039,7 @@ export default function App() {
                   <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <Zap className="w-4 h-4 text-cyan-500 animate-pulse" />
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 font-mono">
                         3. Lifting Mechanisms
                       </span>
                     </div>
@@ -3052,7 +3052,7 @@ export default function App() {
                   <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
                     <div className="flex items-center gap-1.5">
                       <Wind className="w-4 h-4 text-indigo-500" />
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 font-mono">
                         4. Vertical Wind Shear
                       </span>
                     </div>
@@ -3073,7 +3073,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-mono text-[9px] uppercase text-center rounded-xl">
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-600 font-mono text-[9px] uppercase text-center rounded-xl">
                 Synchronizing closest station observational grids...
               </div>
             )}
@@ -3084,11 +3084,11 @@ export default function App() {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-2">
                 <div>
-                  <h3 className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-wider flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-pulse" />
+                  <h3 className="text-slate-600 dark:text-slate-600 text-xs font-black uppercase tracking-wider flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-cyan-700 dark:text-neon-aqua animate-pulse" />
                     D.A.I.S.Y. Microclimate Forecast Trends & Storm Bypass Index
                   </h3>
-                  <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-0.5 uppercase font-mono">
+                  <p className="text-[10px] font-medium text-slate-600 dark:text-slate-600 mt-0.5 uppercase font-mono">
                     Thermodynamic course & intensity prediction computed over 6-hour trailing metrics
                   </p>
                 </div>
@@ -3101,27 +3101,27 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
                 <div className="lg:col-span-7 space-y-4">
                   <div className="space-y-1.5">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block font-mono">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 block font-mono">
                       Environment Diagnostic
                     </span>
                     <p className="text-slate-800 dark:text-white font-black text-lg md:text-xl font-sans tracking-tight leading-snug">
                       {forecastTrend.trendLabel}
                     </p>
-                    <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold leading-relaxed">
+                    <p className="text-slate-600 dark:text-slate-600 text-xs font-semibold leading-relaxed">
                       {forecastTrend.statusDesc}
                     </p>
                   </div>
 
                   <div className="bg-slate-50 dark:bg-slate-950 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
-                      <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 block leading-none font-mono mb-1">
+                      <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-600 block leading-none font-mono mb-1">
                         Bypass / Shield Probability
                       </span>
                       <span className={`text-xl font-black ${forecastTrend.textColor}`}>
                         {forecastTrend.bypassChance}
                       </span>
                     </div>
-                    <div className="text-[10px] text-slate-400 leading-relaxed max-w-xs font-semibold uppercase font-mono">
+                    <div className="text-[10px] text-slate-600 leading-relaxed max-w-xs font-semibold uppercase font-mono">
                       Severe cells may change course, split, or fail completely when encountering local stable air masses.
                     </div>
                   </div>
@@ -3130,10 +3130,10 @@ export default function App() {
                 <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-32 transition-transform hover:scale-[1.01]">
                     <div className="flex justify-between items-start">
-                      <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider font-mono">
+                      <span className="text-[9px] font-black uppercase text-slate-600 dark:text-slate-600 tracking-wider font-mono">
                         Surface Pressure Change
                       </span>
-                      <Gauge className="w-4.5 h-4.5 text-cyan-600 dark:text-neon-aqua" />
+                      <Gauge className="w-4.5 h-4.5 text-cyan-700 dark:text-neon-aqua" />
                     </div>
                     <div>
                       <div className="text-2xl font-black text-slate-800 dark:text-white flex items-baseline gap-1 font-mono">
@@ -3144,7 +3144,7 @@ export default function App() {
                           <TrendingUp className="w-5 h-5 text-teal-500 inline shrink-0" />
                         ) : null}
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 block font-mono">
+                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mt-1 block font-mono">
                         Trend: {forecastTrend.pressureDirection}
                       </span>
                     </div>
@@ -3152,7 +3152,7 @@ export default function App() {
 
                   <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between h-32 transition-transform hover:scale-[1.01]">
                     <div className="flex justify-between items-start">
-                      <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider font-mono">
+                      <span className="text-[9px] font-black uppercase text-slate-600 dark:text-slate-600 tracking-wider font-mono">
                         Convective Availability
                       </span>
                       <Compass className="w-4.5 h-4.5 text-rose-500 dark:text-neon-pink animate-[spin_20s_linear_infinite]" />
@@ -3166,7 +3166,7 @@ export default function App() {
                           <TrendingDown className="w-5 h-5 text-teal-500 inline shrink-0" />
                         )}
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 block font-mono">
+                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mt-1 block font-mono">
                         Analysis: {forecastTrend.capeDirection}
                       </span>
                     </div>
@@ -3176,7 +3176,7 @@ export default function App() {
             </div>
 
             {telemetry && (
-              <div className="flex justify-between items-center text-[8px] font-mono font-semibold text-slate-400 dark:text-slate-600 mt-5 pt-2 border-t border-slate-200 dark:border-slate-800/50">
+              <div className="flex justify-between items-center text-[8px] font-mono font-semibold text-slate-600 dark:text-slate-600 mt-5 pt-2 border-t border-slate-200 dark:border-slate-800/50">
                 <span>STATION METAR ID: {telemetry.stationId}</span>
                 <span>SYNCED: {telemetry.timestamp || 'STABLE'}</span>
               </div>
@@ -3202,7 +3202,7 @@ export default function App() {
                   className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider ${
                     !showHeadedTowardsOnly
                       ? 'bg-slate-800 dark:bg-slate-800 text-white shadow-[0_2px_8px_rgba(0,0,0,0.2)]'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                      : 'text-slate-600 dark:text-slate-600 hover:text-slate-700 dark:hover:text-slate-200'
                   }`}
                 >
                   All Alerts ({alerts.length})
@@ -3214,7 +3214,7 @@ export default function App() {
                   className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 ${
                     showHeadedTowardsOnly
                       ? 'bg-rose-600 dark:bg-rose-500 text-white shadow-[0_2px_8px_rgba(225,29,72,0.3)]'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                      : 'text-slate-600 dark:text-slate-600 hover:text-slate-700 dark:hover:text-slate-200'
                   }`}
                 >
                   Headed Towards Me ({alerts.filter((a) => a.headedTowards || a.isDirectHit).length})
@@ -3229,7 +3229,7 @@ export default function App() {
               <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase font-sans tracking-wider">
                 System Clear
               </h3>
-              <p className="text-slate-500 dark:text-slate-400 font-semibold text-sm max-w-sm mx-auto mt-1 leading-relaxed">
+              <p className="text-slate-600 dark:text-slate-600 font-semibold text-sm max-w-sm mx-auto mt-1 leading-relaxed">
                 Scanning the National Weather Service. No active warnings or watches intersect your designated tracking coordinates.
               </p>
             </div>
@@ -3246,7 +3246,7 @@ export default function App() {
                     <h3 className="text-2xl font-black text-slate-800 dark:text-white uppercase font-sans tracking-wider">
                       Clear in Path
                     </h3>
-                    <p className="text-slate-500 dark:text-slate-400 font-semibold text-sm max-w-sm mx-auto mt-1 leading-relaxed">
+                    <p className="text-slate-600 dark:text-slate-600 font-semibold text-sm max-w-sm mx-auto mt-1 leading-relaxed">
                       You have {alerts.length} active regional alert{alerts.length > 1 ? 's' : ''}, but none are directly projected to track over or intersect your current coordinates or monitored spots.
                     </p>
                     <button
@@ -3278,7 +3278,7 @@ export default function App() {
 
         {/* Alert History Section */}
         <div className="mt-8">
-          <Suspense fallback={<div className="h-[200px] bg-slate-100 dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-500 animate-pulse font-mono uppercase tracking-widest text-xs font-bold">Loading Alert History Archive...</div>}>
+          <Suspense fallback={<div className="h-[200px] bg-slate-100 dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-600 animate-pulse font-mono uppercase tracking-widest text-xs font-bold">Loading Alert History Archive...</div>}>
             <AlertHistory
               history={alertHistory}
               onClearHistory={handleClearAlertHistory}
@@ -3309,7 +3309,7 @@ export default function App() {
               <h3 className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 font-sans tracking-wide mb-2">
                 Manual Forecast Segment Direct Infiltration (MCD Parser)
               </h3>
-              <p className="text-[10px] text-slate-400 mb-4 font-semibold uppercase tracking-wider">
+              <p className="text-[10px] text-slate-600 mb-4 font-semibold uppercase tracking-wider">
                 Paste the full SPC Mesoscale Discussion raw text below (must contain the "LAT...LON" block at the end).
               </p>
               
@@ -3341,7 +3341,7 @@ export default function App() {
           {/* Discussions Cards Deck */}
           {discussions.length === 0 ? (
             <div className="bg-white dark:bg-slate-900/10 border-2 border-dashed border-slate-200 dark:border-slate-800/85 rounded-3xl p-10 text-center shadow-sm">
-              <p className="text-slate-400 font-bold text-xs uppercase tracking-widest leading-relaxed">
+              <p className="text-slate-600 font-bold text-xs uppercase tracking-widest leading-relaxed">
                 Loading Storm Prediction Center Discussions...
               </p>
             </div>
@@ -3394,15 +3394,15 @@ export default function App() {
 
                       {/* Sub details */}
                       <div className="space-y-1.5 mt-4">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-600">
                           <span className="font-bold text-slate-700 dark:text-slate-300">Affecting:</span>
                           <span className="truncate">{md.areasAffected}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-600">
                           <span className="font-bold text-slate-700 dark:text-slate-300">Valid:</span>
                           <span>{md.validTime}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-600">
                           <span className="font-bold text-slate-700 dark:text-slate-300">Proximity:</span>
                           <span className={md.isIntersecting ? 'text-red-500 font-extrabold' : ''}>
                             {md.isIntersecting ? 'Direct Grid Overlapping' : `${md.minDist.toFixed(1)} miles away`}
@@ -3411,7 +3411,7 @@ export default function App() {
                       </div>
 
                       {/* Summary Paragraph */}
-                      <p className="mt-4 text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-950 p-4 border border-slate-200 dark:border-slate-800/60 rounded-2xl">
+                      <p className="mt-4 text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-600 bg-slate-50 dark:bg-slate-950 p-4 border border-slate-200 dark:border-slate-800/60 rounded-2xl">
                         {md.summary}
                       </p>
 
