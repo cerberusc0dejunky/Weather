@@ -295,7 +295,7 @@ function translateAlertsToRotationPins(activeAlerts: NWSAlert[]): RotationPin[] 
   return pins;
 }
 
-export default function App() {
+function App() {
   // Main State Configuration
   const [armed, setArmed] = useState<boolean>(false);
   const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
@@ -747,17 +747,15 @@ export default function App() {
         const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
 
         const syncData = {
-          timestamp: new Date().toISOString(),
-          location: `Chase Target: ${lat.toFixed(4)}, ${lon.toFixed(4)}`,
-          cape: Math.round(capeVal),
-          shear: Math.round(windMph),
-          dewpoint: Math.round(dewPointF),
-          tornado_prob: result ? result.tornadoProbability : 0,
-          downburst_risk: result ? result.downburstRisk : 0,
-          active_alerts: "Target Sync"
+          lat: lat,
+          lon: lon,
+          alerts: [],
+          rotationPins: [],
+          telemetry: null,
+          geminiReport: result ? result.tornadoProbability + "%" : "Unknown"
         };
 
-        const success = await syncToGoogleSheets([syncData]);
+        const success = await syncToGoogleSheets(syncData as any);
         if (success) {
           triggerToast(`Sent telemetry for [${lat.toFixed(2)}, ${lon.toFixed(2)}] to Sheets!`, 'success');
         } else {
