@@ -1,20 +1,10 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# D.A.I.S.Y. (Data Acquisition & Integrated System for Yields)
 
-# Run and deploy your AI Studio app
+D.A.I.S.Y. is a high-frequency telemetry workspace and severe convective tracking system designed to provide real-time radar analysis, microclimate forecasting, and localized proximity alerts to warn users of impending severe weather events such as tornadoes and severe thunderstorms.
 
-This contains everything you need to run your app locally.
+## Features
+- Real-time radar overlays and wind velocity tracking
+- NWS API integration for live alerts and warnings
+- Geolocation tracking and custom anchor point monitoring
+- Interactive dashboard for evaluating severe threat indices
 
-View your app in AI Studio: https://ai.studio/apps/e476e09e-7a89-4636-b64d-549601b86c44
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`

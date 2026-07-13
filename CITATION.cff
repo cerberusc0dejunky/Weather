@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "Granger"
+    given-names: "Chrisleigh"
+title: "D.A.I.S.Y. (Data Acquisition & Integrated System for Yields)"
+version: 1.0.0
+doi: ""
+date-released: 2026-07-12
+license: "MIT"
+repository-code: "https://github.com/cerberusc0dejunky/Weather"
+abstract: >
+  D.A.I.S.Y. (Data Acquisition & Integrated System for Yields) is a high-frequency telemetry workspace and severe convective tracking system. It provides real-time radar analysis, microclimate forecasting, and localized proximity alerts to warn users of impending severe weather events such as tornadoes and severe thunderstorms.

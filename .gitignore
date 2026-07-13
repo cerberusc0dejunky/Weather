@@ -6,3 +6,21 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Scratch files
+update.xml
+update.json
+snapshot.py
+research.md
+metadata.json
+notebooklm/
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+#development folders
+.developer/
+.cursor/
