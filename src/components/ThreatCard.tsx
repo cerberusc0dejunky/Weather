@@ -59,13 +59,12 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
     actionSubtext = 'Weather cell within 50 miles monitoring radius';
   }
 
-  // Display Distance (Change 1: Always-Visible Distance under 3 Mi Fix)
   let distanceLabel = 'OUTSIDE AREA';
   if (hasAssets) {
     if (minDist === 0 || isDirectHit) {
-      distanceLabel = '⚠ IN ZONE';
+      distanceLabel = 'IN ZONE';
     } else if (minDist > 0 && minDist < 999) {
-      distanceLabel = `⚠ ${minDist.toFixed(1)} MILES AWAY`;
+      distanceLabel = `${minDist.toFixed(1)} MILES AWAY`;
     } else {
       distanceLabel = 'WATCH AREA';
     }
@@ -79,7 +78,7 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
     // Level 3 strobe
     cardClass = 'bg-white dark:bg-slate-950 border-4 border-red-600 strobe-pds-active';
     headerClass = 'bg-red-600 text-white font-black uppercase text-center tracking-widest text-lg';
-  } else if (isTornado && (isDirectHit || minDist <= 25)) {
+  } else if (isTornado && !isWatch && (isDirectHit || minDist <= 25)) {
     // Level 2 severe red glow animation
     cardClass = 'bg-white dark:bg-slate-900 border-2 border-red-500 shadow-md dark:shadow-[0_0_15px_rgba(239,68,68,0.3)] animate-[pulse_2s_infinite]';
     headerClass = 'bg-red-600 text-white font-extrabold uppercase text-center tracking-wider';

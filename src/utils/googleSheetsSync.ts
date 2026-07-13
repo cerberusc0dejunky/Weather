@@ -40,6 +40,6 @@ export const syncToGoogleSheets = async (
     return true;
   } catch (error) {
     console.error('Google Sheets Sync Error:', error);
-    throw error;
+    return false;
   }
 };

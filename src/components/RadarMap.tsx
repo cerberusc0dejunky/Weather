@@ -551,7 +551,7 @@ export default function RadarMap({
           .setLatLng(e.latlng)
           .setContent(`
             <div class="text-slate-950 font-sans p-2 min-w-[170px] leading-tight">
-              <div class="font-black text-[11px] uppercase text-slate-800 flex items-center gap-1">📍 STORM CHASE TARGET</div>
+              <div class="font-black text-[11px] uppercase text-slate-800 flex items-center gap-1">STORM CHASE TARGET</div>
               <p class="text-[10px] text-slate-500 font-mono mt-1 font-semibold">${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
               
               <div id="chase-probe-ui" class="my-2 min-h-[40px]">
@@ -809,7 +809,7 @@ export default function RadarMap({
             connectionLine.bindPopup(`
               <div class="text-slate-950 font-sans p-1.5 max-w-[220px]">
                 <div class="font-extrabold text-xs text-cyan-700 uppercase flex items-center gap-1">
-                  🎯 Collision Path: ${asset.name}
+                  Collision Path: ${asset.name}
                 </h5>
                 <p class="text-[10px] mt-1 text-slate-700 leading-snug font-medium">
                   Storm tracking model projects impact path intersecting this saved location.
@@ -835,7 +835,7 @@ export default function RadarMap({
             const badgeHtml = `
               <div class="relative flex items-center justify-center">
                 <div class="px-2 py-0.5 bg-slate-950/95 border border-cyan-400 rounded shadow-[0_2px_8px_rgba(6,182,212,0.5)] flex items-center gap-1 whitespace-nowrap animate-pulse">
-                  <span class="text-[8px] font-black font-mono text-cyan-300">⏱️ ETA: ${assetEta}m</span>
+                  <span class="text-[8px] font-black font-mono text-cyan-300">ETA: ${assetEta}m</span>
                 </div>
               </div>
             `;
@@ -939,7 +939,7 @@ export default function RadarMap({
               </div>
             </div>
           `;
-          popupTitle = '🌪️ ACTIVE GROUND TORNADO';
+          popupTitle = 'ACTIVE GROUND TORNADO';
           popupSubTitle = 'TORNADIC DEBRIS SIGNATURE (TDS)';
           popupBadgeColor = 'bg-rose-700 text-white animate-pulse';
           popupDesc = 'CRITICAL TORNADO CONTACT. Doppler radar dual-polarization data confirms debris detection or emergency spotters verify a destructive tornado on the ground at this location. Take immediate, absolute life safety action.';
@@ -960,7 +960,7 @@ export default function RadarMap({
               </div>
             </div>
           `;
-          popupTitle = '⚠️ RADAR-INDICATED TORNADO';
+          popupTitle = 'RADAR-INDICATED TORNADO';
           popupSubTitle = 'TORNADO WARNING ACTIVE';
           popupBadgeColor = 'bg-orange-600 text-white';
           popupDesc = 'DOPPLER VELOCITY COUPLING. Strong gate-to-gate velocity shear indicative of low-level tornadogenesis or a high-probability vortex formation aloft.';
@@ -975,7 +975,7 @@ export default function RadarMap({
               </svg>
             </div>
           `;
-          popupTitle = '🌀 MESOCYCLONE UPDRAFT';
+          popupTitle = 'MESOCYCLONE UPDRAFT';
           popupSubTitle = 'VELOCITY SHEAR CLASSIFIED';
           popupBadgeColor = 'bg-amber-500 text-slate-950 font-extrabold';
           popupDesc = 'DEEP CONVECTIVE ROTATION. Atmospheric velocity shear detected inside the supercell core. This rotating updraft is a precursor structure capable of supporting severe hazards.';
@@ -1074,7 +1074,7 @@ export default function RadarMap({
                 </div>
                 <div class="font-black text-xs uppercase text-slate-900">${spot.label}</div>
                 <p class="text-[9px] text-slate-500 mt-1 font-mono leading-tight">Average density: <b>${spot.count} severe warnings / year</b></p>
-                <p class="text-[9px] text-rose-700 mt-1.5 font-sans font-bold uppercase leading-none">⚠️ High Warning Recurrence Zone</p>
+                <p class="text-[9px] text-rose-700 mt-1.5 font-sans font-bold uppercase leading-none">High Warning Recurrence Zone</p>
               </div>
             `);
           polygonLayersRef.current.push(coreCircle);
@@ -1287,7 +1287,7 @@ export default function RadarMap({
               <span className="flex h-2 w-2 translate-y-1.5 rounded-full bg-rose-500 shrink-0 shadow-[0_0_8px_#ef4444] animate-ping" />
               <div className="flex-1">
                 <div className="text-[10px] font-black uppercase tracking-wider text-rose-400 mb-0.5">
-                  ⚠️ CAPE MAP OVERLAY ENGINE
+                  CAPE MAP OVERLAY ENGINE
                 </div>
                 <p className="text-[9px] text-slate-300 font-semibold leading-tight font-mono uppercase tracking-tight">
                   {failsafeNotification.message}
@@ -1369,7 +1369,7 @@ export default function RadarMap({
 
           {searchError && (
             <div className="bg-rose-950/95 border border-rose-800 text-rose-300 font-black font-mono text-[8px] tracking-wider uppercase px-2.5 py-1 rounded-lg shadow-2xl animate-pulse pointer-events-auto">
-              ⚠️ {searchError}
+              {searchError}
             </div>
           )}
         </div>
@@ -1430,7 +1430,7 @@ export default function RadarMap({
                 <div className="pt-2 border-t border-slate-900 space-y-1.5">
                   <div className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest">Doppler Hazards</div>
                   <div className="flex items-center gap-2">
-                    <span className="inline-block text-[10px] leading-none animate-[spin_5s_linear_infinite]">🌀</span>
+                    <span className="inline-block text-[10px] leading-none animate-[spin_5s_linear_infinite]">O</span>
                     <span>Convective Rotation Coupling</span>
                   </div>
                   <div className="flex items-center gap-2">

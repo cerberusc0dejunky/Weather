@@ -1117,12 +1117,12 @@ function App() {
       // 6. Issue automated early localized trigger warnings on high-value hazard threats
       if (convectiveIntensificationDetected && velocityCoupletPersistentShear && !isTornadoEvent) {
         triggerToast(
-          `⚠️ AUTOMATED PREDICTIVE WARNING: Severe convective cell tracking directly into extreme local instability. Early tornadic intensification predicted downstream.`,
+          `AUTOMATED PREDICTIVE WARNING: Severe convective cell tracking directly into extreme local instability. Early tornadic intensification predicted downstream.`,
           'error'
         );
       } else if (tornadoDebrisSignatureTDS && isTornadoEvent) {
         triggerToast(
-          `🌪️ HIGH CONFIDENCE TORNADO DISPATCH: Doppler Radar and Dual-Pol correlation coefficients verify physical debris lofted. Seek shelter immediately!`,
+          `HIGH CONFIDENCE TORNADO DISPATCH: Doppler Radar and Dual-Pol correlation coefficients verify physical debris lofted. Seek shelter immediately!`,
           'error'
         );
       }
