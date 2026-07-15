@@ -216,21 +216,41 @@ export default function RadarMap({
       `;
 
       try {
-        const pointKey = localStorage.getItem('daisy-windy-point-key') || (import.meta as any).env?.VITE_WINDY_POINT_KEY;
+        const pointKey = localStorage.getItem('daisy-windy-point-key') || import.meta.env.VITE_WINDY_POINT_KEY;
         if (!pointKey) {
           probeContainer.innerHTML = '<div class="text-[9px] text-red-500 font-bold text-center mt-2">API KEY REQUIRED</div>';
           return;
         }
 
+        const isUS = lat > 24 && lat < 50 && lon > -125 && lon < -66;
+        let model = isUS ? 'namConus' : 'gfs';
+
         const body = {
-          lat, lon, model: "gfs",
+          lat, lon, model,
           parameters: ["temp", "dewpoint", "wind", "gust", "pressure", "cape", "precip"],
-          levels: ["surface"], key: pointKey
+          levels: ["surface"], key: pointKey.trim()
         };
 
-        const res = await fetch("https://api.windy.com/api/point-forecast/v2", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+        const reqHeaders = {
+          'Content-Type': 'application/json',
+          'x-api-key': pointKey.trim(),
+          'key': pointKey.trim()
+        };
+
+        let res = await fetch(`https://api.windy.com/api/point-forecast/v2?key=${pointKey.trim()}`, {
+          method: "POST",
+          headers: reqHeaders,
+          body: JSON.stringify(body)
         });
+
+        if (!res.ok && model !== 'gfs') {
+          body.model = 'gfs';
+          res = await fetch(`https://api.windy.com/api/point-forecast/v2?key=${pointKey.trim()}`, {
+            method: "POST",
+            headers: reqHeaders,
+            body: JSON.stringify(body)
+          });
+        }
 
         if (!res.ok) throw new Error("API failed");
         const data = await res.json();
