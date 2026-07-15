@@ -3437,112 +3437,7 @@ function App() {
             )}
           </section>
 
-          {/* Live Storm Event Capture Console */}
-          <section className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl transition-all text-white my-5" aria-label="Storm Event Capture">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 pb-3 border-b border-slate-800">
-              <div>
-                <h2 className="text-base sm:text-lg font-black font-sans tracking-tight uppercase text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-amber-500 flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full bg-red-500 ${isRecording ? 'animate-ping' : ''}`}></span>
-                  Storm Event Capture Console
-                </h2>
-                <p className="text-[9px] font-mono uppercase tracking-widest text-slate-500 mt-0.5">
-                  Chronological Telemetry Recorder & Archive Engine
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {isRecording ? (
-                  <button
-                    onClick={() => {
-                      setIsRecording(false);
-                      triggerToast('Recording session paused.', 'info');
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black uppercase rounded-lg border border-red-500 cursor-pointer transition-colors shadow-md shadow-red-950/50"
-                  >
-                    <Square className="w-3 h-3 fill-current" />
-                    Stop Capture
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setIsRecording(true);
-                      triggerToast('Storm telemetry capture session started!', 'success');
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase rounded-lg border border-emerald-500 cursor-pointer transition-colors shadow-md shadow-emerald-950/50"
-                  >
-                    <Play className="w-3 h-3 fill-current" />
-                    Start Capture
-                  </button>
-                )}
-
-                {recordedSnapshots.length > 0 && (
-                  <>
-                    <button
-                      onClick={handleExportSessionLog}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-[10px] font-black uppercase rounded-lg border border-slate-700 cursor-pointer transition-colors"
-                    >
-                      <Download className="w-3 h-3 text-cyan-400" />
-                      Export Log
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm('Clear all captured snapshots for this session?')) {
-                          setRecordedSnapshots([]);
-                          localStorage.removeItem('daisy-recorded-snapshots');
-                          triggerToast('Capture session cleared.', 'info');
-                        }
-                      }}
-                      className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-850 hover:bg-slate-800 text-rose-400 text-[10px] font-black uppercase rounded-lg border border-slate-800 cursor-pointer transition-colors"
-                      title="Clear Session"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {recordedSnapshots.length === 0 ? (
-              <div className="py-6 text-center text-slate-500 font-mono text-[9px] uppercase tracking-wider bg-slate-955 border border-slate-850 rounded-2xl">
-                No active capture session. Click "Start Capture" to record the storm progression.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono">
-                  <span>CAPTURED SNAPSHOTS: <b>{recordedSnapshots.length}</b></span>
-                  <span>STATUS: <span className={isRecording ? 'text-red-500 animate-pulse font-black' : 'text-slate-500 font-bold'}>{isRecording ? '● ACTIVE RECORDING' : '⏹ PAUSED'}</span></span>
-                </div>
-                <div className="max-h-[140px] overflow-y-auto border border-slate-850 rounded-2xl bg-slate-955 divide-y divide-slate-900 scrollbar-thin">
-                  {recordedSnapshots.slice().reverse().map((snap, i) => (
-                    <div key={i} className="p-2.5 flex items-center justify-between text-[8.5px] font-mono hover:bg-slate-900/50 transition-colors">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-white font-bold">
-                            {new Date(snap.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                          </span>
-                          <span className="text-slate-500">
-                            [{snap.lat.toFixed(2)}, {snap.lon.toFixed(2)}]
-                          </span>
-                        </div>
-                        <div className="text-[7.5px] text-slate-400 flex gap-2">
-                          <span>CAPE: <b className="text-slate-300">{snap.cape} J/kg</b></span>
-                          <span>WIND: <b className="text-slate-300">{snap.windSpeed} mph</b></span>
-                          <span>DEW POINT: <b className="text-slate-300">{snap.dewPoint}°F</b></span>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-indigo-400 font-black">
-                          {snap.tornadoProbability}% PROB
-                        </div>
-                        <div className="text-[7.5px] text-slate-500 font-bold uppercase">
-                          {snap.downburstRisk} RISK
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
+          {/* Storm Event Capture Console — hidden from regular users, logic runs in background via auto-capture */}
 
             <hr className="border-slate-200 dark:border-slate-800/80 my-5" />
 
@@ -3742,6 +3637,19 @@ function App() {
                             triggerToast(`Moved Gateway to ${targetAlert.event} center!`, 'success');
                           }
                         }
+                      }}
+                      onAutoCapture={(targetAlert) => {
+                        if (targetAlert.geometry && targetAlert.geometry.coordinates) {
+                          const centroid = getGeometryCentroid(targetAlert.geometry.coordinates);
+                          if (centroid) {
+                            setCurrentLat(centroid.lat);
+                            setCurrentLon(centroid.lon);
+                          }
+                        }
+                        if (!isRecording) {
+                          setIsRecording(true);
+                        }
+                        triggerToast(`EMERGENCY AUTO-CAPTURE: Dispatched & recording ${targetAlert.event}!`, 'warning');
                       }}
                     />
                   ))}
