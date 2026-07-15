@@ -426,6 +426,90 @@ function App() {
     linkUrl?: string;
   } | null>(null);
 
+
+  // Keep track of notified warnings to avoid spamming the user
+  const notifiedAlertsRef = useRef<Set<string>>(new Set());
+
+  // Browser background notifications trigger
+  useEffect(() => {
+    if (!settings.browserAlerts) return;
+
+    alerts.forEach((alert) => {
+      const isWarning = alert.event.toUpperCase().includes('WARNING');
+      const isWithinRadius = alert.isDirectHit || alert.minDist <= settings.monitorRadius;
+      
+      if (isWarning && isWithinRadius && !notifiedAlertsRef.current.has(alert.id)) {
+        notifiedAlertsRef.current.add(alert.id);
+        
+        // Trigger browser notification only if the app is hidden in the background
+        if (document.visibilityState === 'hidden' && Notification.permission === 'granted') {
+          try {
+            new Notification(`🚨 CRITICAL DAISY WARNING: ${alert.event}`, {
+              body: `${alert.snippet || alert.event} - detected within ${alert.minDist.toFixed(1)} miles of your location.`,
+              icon: '/icon-512.jpg',
+              tag: alert.id,
+            });
+          } catch (err) {
+            console.error('[Browser Notifications] Error triggering background alert:', err);
+          }
+        }
+      }
+    });
+
+    // Housekeeping: remove old, inactive alerts from our notified set
+    const activeIds = new Set(alerts.map(a => a.id));
+    for (const id of notifiedAlertsRef.current) {
+      if (!activeIds.has(id)) {
+        notifiedAlertsRef.current.delete(id);
+      }
+    }
+  }, [alerts, settings.browserAlerts, settings.monitorRadius]);
+
+  const logNetworkRequest = (log: Omit<NetworkRequestLog, 'id' | 'timestamp'>) => {
+    const newLog: NetworkRequestLog = {
+      ...log,
+      id: Math.random().toString(36).substring(2, 11),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    };
+    setNetworkLogs(prev => [newLog, ...prev].slice(0, 5));
+  };
+
+
+  // PWA deferred installation prompt
+  const [pwaPrompt, setPwaPrompt] = useState<any>(null);
+  const [showInstallGuide, setShowInstallGuide] = useState<boolean>(false);
+
+  // Potential rotation pins state derived from active alerts
+  const [rotationPins, setRotationPins] = useState<RotationPin[]>([]);
+  const [chaserReports, setChaserReports] = useState<ChaserReport[]>([]);
+
+  // Keep rotationPins synchronized with active alerts and chaser reports
+  useEffect(() => {
+    const alertPins = translateAlertsToRotationPins(alerts);
+    const chaserPins: RotationPin[] = chaserReports
+      .filter(r => r.rotationVisible || r.tornadoOnGround || r.wallCloud)
+      .map(r => ({
+        id: `chaser-${r.id}`,
+        lat: r.lat,
+        lon: r.lon,
+        alertId: `chaser-report-${r.id}`,
+        eventName: r.tornadoOnGround ? 'Tornado On Ground (Chaser Verified)' : r.rotationVisible ? 'Rotation Visible (Chaser Verified)' : 'Wall Cloud (Chaser Verified)',
+        areaDesc: 'Spotter Field Report',
+        detectedAt: r.timestamp,
+        pinType: r.tornadoOnGround ? 'vortex' : 'mesocyclone',
+        threatLevel: r.tornadoOnGround ? 'Extreme' : 'Severe',
+        isObserved: true
+      }));
+
+    setRotationPins([...alertPins, ...chaserPins]);
+  }, [alerts, chaserReports]);
+
+  // Experimental Tornadogenesis Probability Analysis States
+  const [tornadogenesisData, setTornadogenesisData] = useState<any | null>(null);
+  const [chaseTarget, setChaseTarget] = useState<any | null>(null);
+  const [isAnalyzingTelemetry, setIsAnalyzingTelemetry] = useState<boolean>(false);
+  const [isSyncingMl, setIsSyncingMl] = useState<boolean>(false);
+
   // Live Storm Event Capture Console states
   const [isRecording, setIsRecording] = useState<boolean>(() => {
     return localStorage.getItem('daisy-is-recording') === 'true';
@@ -531,89 +615,6 @@ function App() {
     
     triggerToast('Session log exported as Markdown!', 'success');
   };
-
-  // Keep track of notified warnings to avoid spamming the user
-  const notifiedAlertsRef = useRef<Set<string>>(new Set());
-
-  // Browser background notifications trigger
-  useEffect(() => {
-    if (!settings.browserAlerts) return;
-
-    alerts.forEach((alert) => {
-      const isWarning = alert.event.toUpperCase().includes('WARNING');
-      const isWithinRadius = alert.isDirectHit || alert.minDist <= settings.monitorRadius;
-      
-      if (isWarning && isWithinRadius && !notifiedAlertsRef.current.has(alert.id)) {
-        notifiedAlertsRef.current.add(alert.id);
-        
-        // Trigger browser notification only if the app is hidden in the background
-        if (document.visibilityState === 'hidden' && Notification.permission === 'granted') {
-          try {
-            new Notification(`🚨 CRITICAL DAISY WARNING: ${alert.event}`, {
-              body: `${alert.snippet || alert.event} - detected within ${alert.minDist.toFixed(1)} miles of your location.`,
-              icon: '/icon-512.jpg',
-              tag: alert.id,
-            });
-          } catch (err) {
-            console.error('[Browser Notifications] Error triggering background alert:', err);
-          }
-        }
-      }
-    });
-
-    // Housekeeping: remove old, inactive alerts from our notified set
-    const activeIds = new Set(alerts.map(a => a.id));
-    for (const id of notifiedAlertsRef.current) {
-      if (!activeIds.has(id)) {
-        notifiedAlertsRef.current.delete(id);
-      }
-    }
-  }, [alerts, settings.browserAlerts, settings.monitorRadius]);
-
-  const logNetworkRequest = (log: Omit<NetworkRequestLog, 'id' | 'timestamp'>) => {
-    const newLog: NetworkRequestLog = {
-      ...log,
-      id: Math.random().toString(36).substring(2, 11),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    };
-    setNetworkLogs(prev => [newLog, ...prev].slice(0, 5));
-  };
-
-
-  // PWA deferred installation prompt
-  const [pwaPrompt, setPwaPrompt] = useState<any>(null);
-  const [showInstallGuide, setShowInstallGuide] = useState<boolean>(false);
-
-  // Potential rotation pins state derived from active alerts
-  const [rotationPins, setRotationPins] = useState<RotationPin[]>([]);
-  const [chaserReports, setChaserReports] = useState<ChaserReport[]>([]);
-
-  // Keep rotationPins synchronized with active alerts and chaser reports
-  useEffect(() => {
-    const alertPins = translateAlertsToRotationPins(alerts);
-    const chaserPins: RotationPin[] = chaserReports
-      .filter(r => r.rotationVisible || r.tornadoOnGround || r.wallCloud)
-      .map(r => ({
-        id: `chaser-${r.id}`,
-        lat: r.lat,
-        lon: r.lon,
-        alertId: `chaser-report-${r.id}`,
-        eventName: r.tornadoOnGround ? 'Tornado On Ground (Chaser Verified)' : r.rotationVisible ? 'Rotation Visible (Chaser Verified)' : 'Wall Cloud (Chaser Verified)',
-        areaDesc: 'Spotter Field Report',
-        detectedAt: r.timestamp,
-        pinType: r.tornadoOnGround ? 'vortex' : 'mesocyclone',
-        threatLevel: r.tornadoOnGround ? 'Extreme' : 'Severe',
-        isObserved: true
-      }));
-
-    setRotationPins([...alertPins, ...chaserPins]);
-  }, [alerts, chaserReports]);
-
-  // Experimental Tornadogenesis Probability Analysis States
-  const [tornadogenesisData, setTornadogenesisData] = useState<any | null>(null);
-  const [chaseTarget, setChaseTarget] = useState<any | null>(null);
-  const [isAnalyzingTelemetry, setIsAnalyzingTelemetry] = useState<boolean>(false);
-  const [isSyncingMl, setIsSyncingMl] = useState<boolean>(false);
 
   // Live ML Engine Inference
   useEffect(() => {
