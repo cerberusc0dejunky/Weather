@@ -69,6 +69,7 @@ export interface SystemSettings {
   monitorRadius: number;
   telemetryDebug?: boolean;
   highContrast?: boolean;
+  browserAlerts?: boolean;
 }
 
 export interface MesoscaleDiscussion {

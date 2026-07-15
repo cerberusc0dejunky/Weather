@@ -66,6 +66,8 @@ import {
   Cloud,
   Terminal,
   Key,
+  Bell,
+  BellOff,
 } from 'lucide-react';
 
 const TRACKED_ALERTS_FILTER = [
@@ -404,6 +406,7 @@ function App() {
     monitorRadius: 25,
     telemetryDebug: false,
     highContrast: false,
+    browserAlerts: false,
   });
 
   // Custom user-managed API keys
@@ -420,6 +423,44 @@ function App() {
     linkText?: string;
     linkUrl?: string;
   } | null>(null);
+
+  // Keep track of notified warnings to avoid spamming the user
+  const notifiedAlertsRef = useRef<Set<string>>(new Set());
+
+  // Browser background notifications trigger
+  useEffect(() => {
+    if (!settings.browserAlerts) return;
+
+    alerts.forEach((alert) => {
+      const isWarning = alert.event.toUpperCase().includes('WARNING');
+      const isWithinRadius = alert.isDirectHit || alert.minDist <= settings.monitorRadius;
+      
+      if (isWarning && isWithinRadius && !notifiedAlertsRef.current.has(alert.id)) {
+        notifiedAlertsRef.current.add(alert.id);
+        
+        // Trigger browser notification only if the app is hidden in the background
+        if (document.visibilityState === 'hidden' && Notification.permission === 'granted') {
+          try {
+            new Notification(`🚨 CRITICAL DAISY WARNING: ${alert.event}`, {
+              body: `${alert.snippet || alert.event} - detected within ${alert.minDist.toFixed(1)} miles of your location.`,
+              icon: '/icon-512.jpg',
+              tag: alert.id,
+            });
+          } catch (err) {
+            console.error('[Browser Notifications] Error triggering background alert:', err);
+          }
+        }
+      }
+    });
+
+    // Housekeeping: remove old, inactive alerts from our notified set
+    const activeIds = new Set(alerts.map(a => a.id));
+    for (const id of notifiedAlertsRef.current) {
+      if (!activeIds.has(id)) {
+        notifiedAlertsRef.current.delete(id);
+      }
+    }
+  }, [alerts, settings.browserAlerts, settings.monitorRadius]);
 
   const logNetworkRequest = (log: Omit<NetworkRequestLog, 'id' | 'timestamp'>) => {
     const newLog: NetworkRequestLog = {
@@ -468,16 +509,26 @@ function App() {
 
   // Live ML Engine Inference
   useEffect(() => {
+    if (!rotationPins || rotationPins.length === 0) {
+      setTornadogenesisData(null);
+      setIsAnalyzingTelemetry(false);
+      return;
+    }
+
     const runInference = async () => {
       setIsAnalyzingTelemetry(true);
       try {
-        const cape = windyPointTelemetry?.cape || (telemetry?.temperatureC && telemetry?.dewpointC ? 1500 : 0);
-        const dewPoint = telemetry?.dewpointC 
+        const rawCape = windyPointTelemetry?.cape || (telemetry?.temperatureC && telemetry?.dewpointC ? 1500 : 0);
+        const rawDewPoint = telemetry?.dewpointC 
           ? (telemetry.dewpointC * 9/5) + 32 
           : (windyPointTelemetry?.dewpoint !== undefined ? windyPointTelemetry.dewpoint : 55);
-        const shearMph = telemetry?.windSpeedKmH 
+        const rawShearMph = telemetry?.windSpeedKmH 
           ? telemetry.windSpeedKmH * 0.621371 
           : (windyPointTelemetry?.wind !== undefined ? windyPointTelemetry.wind : 15);
+
+        const cape = Number(rawCape) || 0;
+        const dewPoint = Number(rawDewPoint) || 0;
+        const shearMph = Number(rawShearMph) || 0;
 
         const result = await runMlInference({
           cape,
@@ -2813,6 +2864,49 @@ function App() {
                 </span>
               </label>
 
+              {/* Browser Alerts Toggle */}
+              <label className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.browserAlerts || false}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    if (checked) {
+                      if (!('Notification' in window)) {
+                        triggerToast('Browser notifications are not supported by this browser.', 'error');
+                        return;
+                      }
+                      
+                      let permission = Notification.permission;
+                      if (permission === 'default') {
+                        triggerToast('Requesting browser notification permissions...', 'info');
+                        permission = await Notification.requestPermission();
+                      }
+                      
+                      if (permission === 'granted') {
+                        triggerToast('Browser alerts enabled successfully!', 'success');
+                        setSettings((s) => ({ ...s, browserAlerts: true }));
+                      } else {
+                        triggerToast(`Browser alerts permission denied (${permission}).`, 'error');
+                        setSettings((s) => ({ ...s, browserAlerts: false }));
+                      }
+                    } else {
+                      setSettings((s) => ({ ...s, browserAlerts: false }));
+                      triggerToast('Browser alerts disabled.', 'info');
+                    }
+                  }}
+                  className="w-4 h-4 accent-pink-600 dark:accent-pink-400 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
+                />
+                <span className="flex items-center gap-1">
+                  {settings.browserAlerts ? (
+                    <Bell className="w-3.5 h-3.5 text-pink-500 animate-bounce" />
+                  ) : (
+                    <BellOff className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  Browser Alerts
+                </span>
+              </label>
+
 
 
               {/* Monitor Radius Slider */}
@@ -3073,13 +3167,21 @@ function App() {
               </div>
             </div>
 
-            {/* Main Content Body */}
             {isAnalyzingTelemetry ? (
               <div className="py-12 flex flex-col items-center justify-center gap-3">
                 <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
                 <p className="text-[10px] sm:text-xs font-mono uppercase tracking-wider text-slate-600 dark:text-slate-600 font-bold animate-pulse">
                   Querying dynamic atmospheric solver columns...
                 </p>
+              </div>
+            ) : !rotationPins || rotationPins.length === 0 ? (
+              <div className="p-5 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 text-slate-500 dark:text-slate-450 font-mono text-[9px] uppercase tracking-wider text-center rounded-2xl flex flex-col items-center justify-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[8px] font-black text-slate-550 dark:text-slate-500">
+                  SYSTEM IDLE / STANDBY
+                </span>
+                <span className="text-[8px] text-slate-550 dark:text-slate-550 font-sans tracking-normal normal-case">
+                  Model standby. Waiting for convective storm track, vortex, or mesocyclone signature to be identified on the radar.
+                </span>
               </div>
             ) : tornadogenesisData ? (
               <div className="space-y-6 animate-fade-in">

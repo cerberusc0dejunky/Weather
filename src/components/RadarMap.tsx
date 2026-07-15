@@ -155,6 +155,9 @@ export default function RadarMap({
   const [reflectivityType, setReflectivityType] = useState<'standard' | 'high-res'>('standard');
   const [showHeatmap, setShowHeatmap] = useState<boolean>(true);
   
+  const [retryCount, setRetryCount] = useState<number>(0);
+  const [mapDimensions, setMapDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  
   // Custom HUD and interactivity states
   const [zoomLevel, setZoomLevel] = useState<number>(8);
   const [isLegendExpanded, setIsLegendExpanded] = useState<boolean>(false);
@@ -310,6 +313,13 @@ export default function RadarMap({
 
   // Monitor script presence on mount
   useEffect(() => {
+    const windyKey = customMapKey || localStorage.getItem('daisy-windy-map-key') || (import.meta as any).env?.VITE_WINDY_MAP_KEY;
+    if (!windyKey) {
+      console.warn('[RadarMap] No Windy API key configured. Instantly falling back to Leaflet failsafe map.');
+      setInitError(true);
+      return;
+    }
+
     let checkCount = 0;
     const interval = setInterval(() => {
       checkCount++;
@@ -323,23 +333,78 @@ export default function RadarMap({
       }
     }, 200);
 
-    return () => clearInterval(interval);
-  }, []);
+    // Smart 3.5s loading timeout to fall back if Windy script is rate-limited or fails to boot
+    const timeout = setTimeout(() => {
+      if (!window.windyInit || !window.L) {
+        console.warn('[RadarMap] Windy Map API failed to load within 3.5s. Falling back to Leaflet.');
+        setInitError(true);
+      }
+    }, 3500);
 
-  // Initialize Windy Map or Fallback
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [customMapKey]);
+
+  // Track map container dimensions and safety state
+  useEffect(() => {
+    const container = document.getElementById(initError ? 'fallback-leaflet-map' : 'windy');
+    if (!container) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setMapDimensions({
+          width: Math.round(entry.contentRect.width),
+          height: Math.round(entry.contentRect.height),
+        });
+      }
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [initError, apiLoaded]);
+
+  // Initialize Windy Map or Fallback with retry and timeout logic
   useEffect(() => {
     if (!apiLoaded || initError || !window.windyInit || !window.L) return;
 
-    // Remove any stale container inside #windy to prevent duplicates
     const container = document.getElementById('windy');
-    if (container) {
-      container.innerHTML = '';
+    if (!container) return;
+
+    const height = container.clientHeight || 0;
+    if (height === 0) {
+      console.warn(`[RadarMap] Map container height is 0px. Postponing initialization (retry ${retryCount}/5)...`);
+      if (retryCount < 5) {
+        const timer = setTimeout(() => setRetryCount(prev => prev + 1), 1000);
+        return () => clearTimeout(timer);
+      } else {
+        console.error('[RadarMap] Failed to initialize Windy: container height remained 0px.');
+        setInitError(true);
+        return;
+      }
     }
+
+    container.innerHTML = '';
+
+    let isSuccess = false;
+    
+    // Set 4-second timeout to transition to failsafe if windyInit callback never triggers
+    const bootTimeout = setTimeout(() => {
+      if (!isSuccess) {
+        console.warn('[RadarMap] windyInit callback timed out (4s).');
+        if (retryCount < 5) {
+          console.log(`[RadarMap] Retrying Windy initialization (retry ${retryCount + 1}/5)...`);
+          setRetryCount(prev => prev + 1);
+        } else {
+          console.error('[RadarMap] Max retries reached. Switching to failsafe Leaflet map.');
+          setInitError(true);
+        }
+      }
+    }, 4000);
 
     try {
       const windyKey = customMapKey || localStorage.getItem('daisy-windy-map-key') || (import.meta as any).env?.VITE_WINDY_MAP_KEY;
       const options = {
-        // Provided valid developer Map Forecast Windy API key or user dynamic override
         key: windyKey,
         lat: userLat,
         lon: userLon,
@@ -347,6 +412,9 @@ export default function RadarMap({
       };
 
       window.windyInit(options, (windyAPI: any) => {
+        isSuccess = true;
+        clearTimeout(bootTimeout);
+        
         const { map, store } = windyAPI;
         windyMapRef.current = map;
         windyStoreRef.current = store;
@@ -361,13 +429,19 @@ export default function RadarMap({
       });
     } catch (err) {
       console.error('Windy Map initialization error:', err);
-      setInitError(true);
+      clearTimeout(bootTimeout);
+      if (retryCount < 5) {
+        setRetryCount(prev => prev + 1);
+      } else {
+        setInitError(true);
+      }
     }
 
     return () => {
+      clearTimeout(bootTimeout);
       cleanupInteractiveElements();
     };
-  }, [apiLoaded, initError, customMapKey]);
+  }, [apiLoaded, initError, customMapKey, retryCount]);
 
   // Sync Map Overlay Mode instantly (no reload!)
   useEffect(() => {
@@ -394,17 +468,34 @@ export default function RadarMap({
     const element = document.getElementById('fallback-leaflet-map');
     if (!element) return;
 
+    let resizeObserver: ResizeObserver | null = null;
+
     if (!fallbackMapRef.current) {
       try {
         const L = window.L;
         const fMap = L.map('fallback-leaflet-map', {
           zoomControl: false,
         }).setView([userLat, userLon], assets.length > 0 ? 8 : 6);
+
+        // Add CartoDB Dark Matter base tile grid layer
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 20
+        }).addTo(fMap);
         
         L.control.zoom({ position: 'topright' }).addTo(fMap);
         
         fallbackMapRef.current = fMap;
         windyMapRef.current = fMap;
+
+        // ResizeObserver to dynamically trigger map size invalidation
+        resizeObserver = new ResizeObserver(() => {
+          try {
+            fMap.invalidateSize();
+          } catch (e) {}
+        });
+        resizeObserver.observe(element);
 
         // Force initial update of elements on fallback map
         updateInteractiveElements();
@@ -430,17 +521,227 @@ export default function RadarMap({
     }
 
     return () => {
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       if (fallbackMapRef.current) {
         try {
           fallbackMapRef.current.remove();
         } catch (e) {}
-          fallbackMapRef.current = null;
+        fallbackMapRef.current = null;
         if (windyMapRef.current === fallbackMapRef.current) {
           windyMapRef.current = null;
         }
       }
     };
   }, [initError, userLat, userLon, apiLoaded]);
+
+  // Failsafe Canvas Wind Particles Overlay
+  useEffect(() => {
+    if (!initError || mapMode !== 'wind' || !window.L || !fallbackMapRef.current) return;
+
+    const canvas = document.getElementById('wind-particle-canvas') as HTMLCanvasElement;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const L = window.L;
+    const map = fallbackMapRef.current;
+    
+    // Resize canvas to match the container
+    const resizeCanvas = () => {
+      const rect = canvas.parentElement?.getBoundingClientRect();
+      canvas.width = rect?.width || canvas.clientWidth;
+      canvas.height = rect?.height || canvas.clientHeight;
+    };
+    resizeCanvas();
+
+    // Create particles
+    interface Particle {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      life: number;
+      maxLife: number;
+      speed: number;
+      color: string;
+    }
+
+    const numParticles = 180;
+    const particles: Particle[] = [];
+
+    // Helper to generate a particle
+    const createParticle = (randomizeLife = false): Particle => {
+      const px = Math.random() * canvas.width;
+      const py = Math.random() * canvas.height;
+      return {
+        x: px,
+        y: py,
+        vx: 0,
+        vy: 0,
+        life: randomizeLife ? Math.random() * 80 : 0,
+        maxLife: 40 + Math.random() * 60,
+        speed: 1 + Math.random() * 2,
+        color: 'rgba(6, 182, 212, 0.4)' // default Cyan/Aqua
+      };
+    };
+
+    for (let i = 0; i < numParticles; i++) {
+      particles.push(createParticle(true));
+    }
+
+    // Active hazard locations in screen coords
+    interface HazardCentroid {
+      x: number;
+      y: number;
+      isTornado: boolean;
+      isSevere: boolean;
+    }
+
+    let animationFrameId: number;
+
+    const animate = () => {
+      ctx.fillStyle = 'rgba(10, 15, 36, 0.15)'; // Slightly translucent dark backdrop for trail effect
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Get current hazard centroids in screen coordinates
+      const hazards: HazardCentroid[] = [];
+
+      // 1. Vortex pins
+      rotationPins.forEach((pin) => {
+        try {
+          const latlng = L.latLng(pin.lat, pin.lon);
+          const pos = map.latLngToContainerPoint(latlng);
+          hazards.push({
+            x: pos.x,
+            y: pos.y,
+            isTornado: pin.pinType === 'vortex' || pin.threatLevel === 'Extreme',
+            isSevere: true
+          });
+        } catch (e) {}
+      });
+
+      // 2. Alert centroids
+      alerts.forEach((alert) => {
+        if (alert.geometry && alert.geometry.coordinates) {
+          try {
+            const centroid = getGeometryCentroid(alert.geometry.coordinates);
+            if (centroid) {
+              const latlng = L.latLng(centroid.lat, centroid.lon);
+              const pos = map.latLngToContainerPoint(latlng);
+              hazards.push({
+                x: pos.x,
+                y: pos.y,
+                isTornado: alert.event.toUpperCase().includes('TORNADO'),
+                isSevere: alert.event.toUpperCase().includes('WARNING')
+              });
+            }
+          } catch (e) {}
+        }
+      });
+
+      particles.forEach((p, idx) => {
+        // Base flow field: West-Northwest (WNW) to East-Southeast (ESE)
+        let angle = (25 * Math.PI) / 180; // 25 degrees
+        let targetSpeed = p.speed;
+        let color = 'rgba(6, 182, 212, 0.4)'; // Translucent Cyan/Aqua for background current
+
+        // Calculate pull from active convective hazards (suction effect)
+        let pullX = 0;
+        let pullY = 0;
+        let closestDist = 999999;
+        let closestHazard: HazardCentroid | null = null;
+
+        hazards.forEach((h) => {
+          const dx = h.x - p.x;
+          const dy = h.y - p.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < closestDist) {
+            closestDist = dist;
+            closestHazard = h;
+          }
+
+          if (dist < 250) {
+            const force = (250 - dist) / 250;
+            const angleToCenter = Math.atan2(dy, dx);
+            const cyclonicAngle = angleToCenter - Math.PI / 2; // -90 deg for CCW rotation
+
+            pullX += Math.cos(cyclonicAngle) * force * 3;
+            pullY += Math.sin(cyclonicAngle) * force * 3;
+
+            pullX += Math.cos(angleToCenter) * force * 1.5;
+            pullY += Math.sin(angleToCenter) * force * 1.5;
+          }
+        });
+
+        // Apply forces
+        let baseVx = Math.cos(angle) * targetSpeed;
+        let baseVy = Math.sin(angle) * targetSpeed;
+
+        p.vx = baseVx + pullX;
+        p.vy = baseVy + pullY;
+
+        // Determine particle color and speed boost based on closest hazard
+        if (closestHazard && closestDist < 250) {
+          const force = (250 - closestDist) / 250;
+          if (closestHazard.isTornado) {
+            // Tornado vortex -> Neon Pink / Magenta
+            color = `rgba(255, 105, 180, ${0.4 + force * 0.5})`; // neon pink
+            p.vx *= 1.4; // accelerate
+            p.vy *= 1.4;
+          } else if (closestHazard.isSevere) {
+            // Severe inflow -> Electric Amber / Orange
+            color = `rgba(249, 115, 22, ${0.4 + force * 0.5})`; // amber
+            p.vx *= 1.2;
+            p.vy *= 1.2;
+          }
+        }
+
+        // Update position
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life++;
+
+        // Draw particle trail segment
+        ctx.beginPath();
+        ctx.moveTo(p.x - p.vx * 1.5, p.y - p.vy * 1.5);
+        ctx.lineTo(p.x, p.y);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+
+        // Respawn if out of bounds or dead
+        if (
+          p.x < 0 || p.x > canvas.width ||
+          p.y < 0 || p.y > canvas.height ||
+          p.life >= p.maxLife
+        ) {
+          particles[idx] = createParticle(false);
+        }
+      });
+
+      animationFrameId = requestAnimationFrame(animate);
+    };
+
+    animate();
+
+    const handleMapUpdate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    };
+
+    map.on('zoomstart dragstart movestart', handleMapUpdate);
+    map.on('resize', resizeCanvas);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      if (map) {
+        map.off('zoomstart dragstart movestart', handleMapUpdate);
+        map.off('resize', resizeCanvas);
+      }
+    };
+  }, [initError, mapMode, rotationPins, alerts, zoomLevel]);
 
   // Pan the Windy Map if the top-level user coordinates change (e.g. from the main search bar)
   useEffect(() => {
@@ -595,6 +896,12 @@ export default function RadarMap({
           maxZoom: 18,
           opacity: reflectivityType === 'high-res' ? 0.9 : 0.65,
           className: reflectivityType === 'high-res' ? 'radar-high-res-enhanced' : 'radar-standard-rendering',
+        }).addTo(map);
+      } else if (initError && (mapMode === 'wind' || mapMode === 'satellite')) {
+        tileLayerRef.current = L.tileLayer('https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes_east_conus_ch13/{z}/{x}/{y}.png', {
+          attribution: 'GOES East Infrared Satellite &copy; NOAA/IEM',
+          maxZoom: 18,
+          opacity: 0.6,
         }).addTo(map);
       }
 
@@ -1466,17 +1773,45 @@ export default function RadarMap({
         </div>
 
         {initError ? (
-          <div className="w-full h-full relative">
-            <div id="fallback-leaflet-map" className="w-full h-full"></div>
-            {/* HUD Status overlay */}
-            <div className="absolute top-14 left-3 z-[400] bg-slate-950/90 border border-slate-800 p-3 rounded-xl max-w-[200px] text-white shadow-2xl backdrop-blur-md">
+          <div className="w-full h-full relative" id="fallback-leaflet-map-wrapper">
+            <div id="fallback-leaflet-map" className="w-full h-full map-pane-resizable"></div>
+            {/* Custom HTML5 Canvas for wind particle streams */}
+            {mapMode === 'wind' && (
+              <canvas
+                id="wind-particle-canvas"
+                className="absolute inset-0 z-[399] pointer-events-none w-full h-full"
+              />
+            )}
+            {/* HUD Status overlay with Diagnostics Panel */}
+            <div className="absolute top-14 left-3 z-[400] bg-slate-950/90 border border-slate-800 p-3 rounded-xl max-w-[220px] text-white shadow-2xl backdrop-blur-md">
               <div className="flex items-center gap-1.5 text-[9px] font-bold text-cyan-400 mb-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span>Failsafe Mode Active</span>
               </div>
-              <p className="text-[8px] text-slate-400 font-medium">
+              <p className="text-[8px] text-slate-405 text-slate-400 font-medium">
                 Tracking {assets.length} point anchors against {alerts.length} warning zones in failsafe Leaflet mode.
               </p>
+              
+              <div className="mt-2.5 pt-2 border-t border-slate-850 space-y-1 text-[7.5px] font-mono text-slate-400">
+                <div className="flex justify-between">
+                  <span>DIMENSIONS:</span>
+                  <span className="text-white font-bold">{mapDimensions.width}x{mapDimensions.height}px</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>HEIGHT SAFETY:</span>
+                  <span className={mapDimensions.height >= 320 ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                    {mapDimensions.height >= 320 ? "SAFE (>=320px)" : "WARNING (<320px)"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>OVERLAY:</span>
+                  <span className="text-cyan-400 font-bold uppercase">{mapMode}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>WINDY RETRIES:</span>
+                  <span className="text-rose-455 text-rose-450 font-bold">{retryCount} / 5</span>
+                </div>
+              </div>
             </div>
             
             {/* Proximity alerts status overlay */}
@@ -1514,9 +1849,16 @@ export default function RadarMap({
                 <h4 className="text-sm font-black uppercase tracking-wider text-white">
                   Securing Satellite Link
                 </h4>
-                <p className="text-slate-500 text-[10px] font-mono mt-1">
+                <p className="text-slate-500 text-[10px] font-mono mt-1 mb-4">
                   Connecting to Windy Map API...
                 </p>
+                {/* Manual Bypass Button */}
+                <button
+                  onClick={() => setInitError(true)}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-[9px] font-black uppercase rounded-lg border border-slate-700 cursor-pointer shadow-md transition-colors"
+                >
+                  Bypass & Use Failsafe Map
+                </button>
               </div>
             )}
           </div>
