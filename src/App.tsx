@@ -3733,6 +3733,16 @@ function App() {
                       alert={alert}
                       hasAssets={assets.length > 0}
                       onViewTrajectory={handleFocusTrajectory}
+                      onStormChase={(targetAlert) => {
+                        if (targetAlert.geometry && targetAlert.geometry.coordinates) {
+                          const centroid = getGeometryCentroid(targetAlert.geometry.coordinates);
+                          if (centroid) {
+                            setCurrentLat(centroid.lat);
+                            setCurrentLon(centroid.lon);
+                            triggerToast(`Moved Gateway to ${targetAlert.event} center!`, 'success');
+                          }
+                        }
+                      }}
                     />
                   ))}
                 </div>

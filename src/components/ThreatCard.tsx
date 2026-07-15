@@ -7,9 +7,10 @@ interface ThreatCardProps {
   alert: NWSAlert;
   hasAssets: boolean;
   onViewTrajectory?: (alert: NWSAlert) => void;
+  onStormChase?: (alert: NWSAlert) => void;
 }
 
-export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: ThreatCardProps) {
+export default function ThreatCard({ alert, hasAssets, onViewTrajectory, onStormChase }: ThreatCardProps) {
   const { event, areaDesc, expires, minDist, isDirectHit, headedTowards, etaMinutes, snippet, keywords, justUpdated } = alert;
   const isEmergency = keywords.emergency || event.includes('EMERGENCY');
   const isTornado = event.includes('TORNADO') || keywords.rotation || keywords.observed || keywords.funnel;
@@ -294,9 +295,19 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
         {onViewTrajectory && (isDirectHit || minDist <= 50) && (
           <button
             onClick={() => onViewTrajectory(alert)}
-            className="mt-4 w-full bg-slate-50 dark:bg-slate-950 border border-cyan-300 dark:border-neon-aqua/50 hover:border-cyan-500 dark:hover:border-neon-aqua hover:bg-cyan-50 dark:hover:bg-neon-aqua/10 text-cyan-600 dark:text-neon-aqua font-bold py-2 rounded-xl text-xs uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
+            className="mt-4 w-full bg-slate-50 dark:bg-slate-955 border border-cyan-300 dark:border-neon-aqua/50 hover:border-cyan-500 dark:hover:border-neon-aqua hover:bg-cyan-50 dark:hover:bg-neon-aqua/10 text-cyan-600 dark:text-neon-aqua font-bold py-2 rounded-xl text-xs uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
           >
             <Eye className="w-3.5 h-3.5" /> Analyze Storm Trajectory
+          </button>
+        )}
+
+        {/* Storm Chase Button */}
+        {onStormChase && alert.geometry && (
+          <button
+            onClick={() => onStormChase(alert)}
+            className="mt-2 w-full bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-700 hover:to-amber-700 text-white font-extrabold py-2 rounded-xl text-xs uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-950/20"
+          >
+            <Compass className="w-3.5 h-3.5 animate-[spin_6s_linear_infinite]" strokeWidth={3} /> Dispatch Chase Team Here
           </button>
         )}
       </div>
