@@ -301,26 +301,6 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory, onStorm
             <Eye className="w-3.5 h-3.5" /> Analyze Storm Trajectory
           </button>
         )}
-
-        {/* Storm Chase Button */}
-        {onStormChase && alert.geometry && (
-          <button
-            onClick={() => onStormChase(alert)}
-            className="mt-2 w-full bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-700 hover:to-amber-700 text-white font-extrabold py-2 rounded-xl text-xs uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-950/20"
-          >
-            <Compass className="w-3.5 h-3.5 animate-[spin_6s_linear_infinite]" strokeWidth={3} /> Dispatch Chase Team Here
-          </button>
-        )}
-
-        {/* Emergency Auto-Capture Button — only on Tornado Emergency events */}
-        {onAutoCapture && isEmergency && isTornado && alert.geometry && (
-          <button
-            onClick={() => onAutoCapture(alert)}
-            className="mt-2 w-full bg-gradient-to-r from-red-700 via-rose-600 to-red-700 hover:from-red-800 hover:via-rose-700 hover:to-red-800 text-white font-extrabold py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-red-950/40 animate-pulse border border-red-500/50"
-          >
-            <Radio className="w-4 h-4" strokeWidth={3} /> Dispatch & Auto-Capture Emergency
-          </button>
-        )}
       </div>
 
       {/* Expiration Bar */}

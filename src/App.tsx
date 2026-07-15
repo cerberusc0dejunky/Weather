@@ -3649,7 +3649,7 @@ function App() {
                         if (!isRecording) {
                           setIsRecording(true);
                         }
-                        triggerToast(`EMERGENCY AUTO-CAPTURE: Dispatched & recording ${targetAlert.event}!`, 'warning');
+                        triggerToast(`EMERGENCY AUTO-CAPTURE: Dispatched & recording ${targetAlert.event}!`, 'error');
                       }}
                     />
                   ))}
