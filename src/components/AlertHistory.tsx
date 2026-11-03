@@ -34,11 +34,11 @@ export default function AlertHistory({ history, onClearHistory, onRemoveItem }: 
   const getThreatBadgeClass = (level: string) => {
     switch (level) {
       case 'Extreme':
-        return 'bg-rose-950/40 text-rose-450 dark:text-rose-400 border border-rose-500/40';
+        return 'bg-rose-950/40 text-rose-400 dark:text-rose-400 border border-rose-500/40';
       case 'High':
-        return 'bg-orange-950/40 text-orange-450 dark:text-orange-400 border border-orange-500/40';
+        return 'bg-orange-950/40 text-orange-400 dark:text-orange-400 border border-orange-500/40';
       case 'Moderate':
-        return 'bg-amber-950/40 text-amber-450 dark:text-amber-400 border border-amber-500/40';
+        return 'bg-amber-950/40 text-amber-400 dark:text-amber-400 border border-amber-500/40';
       default:
         return 'bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800';
     }
@@ -47,7 +47,7 @@ export default function AlertHistory({ history, onClearHistory, onRemoveItem }: 
   return (
     <section className="bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-3xl p-5 shadow-sm transition-colors flex flex-col" aria-label="Alert History">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-5 pb-3 border-b border-slate-100 dark:border-slate-800/50">
-        <h3 className="text-slate-850 dark:text-white text-sm font-black uppercase tracking-wider flex items-center gap-2">
+        <h3 className="text-slate-800 dark:text-white text-sm font-black uppercase tracking-wider flex items-center gap-2">
           <History className="w-4 h-4 text-cyan-600 dark:text-neon-aqua animate-[spin_40s_linear_infinite]" />
           Resolved Threat Log (Last 10 Alerts)
         </h3>
@@ -63,7 +63,7 @@ export default function AlertHistory({ history, onClearHistory, onRemoveItem }: 
       </div>
 
       {history.length === 0 ? (
-        <div className="py-10 text-center flex flex-col items-center justify-center border-2 border-dashed border-slate-100 dark:border-slate-850 rounded-2xl">
+        <div className="py-10 text-center flex flex-col items-center justify-center border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-2xl">
           <ShieldCheck className="w-8 h-8 text-slate-300 dark:text-slate-600 mb-2" />
           <span className="text-[10px] font-black font-sans uppercase tracking-widest text-slate-400 dark:text-slate-500">
             Archive Empty
@@ -80,7 +80,7 @@ export default function AlertHistory({ history, onClearHistory, onRemoveItem }: 
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.2, delay: index * 0.05 }}
-              className="bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-850 p-3.5 rounded-xl flex items-start gap-4 transition-all relative group hover:border-slate-300 dark:hover:border-slate-800"
+              className="bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 p-3.5 rounded-xl flex items-start gap-4 transition-all relative group hover:border-slate-300 dark:hover:border-slate-800"
             >
               <div className="flex-grow min-w-0">
                 <div className="flex flex-wrap items-center gap-2">

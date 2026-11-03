@@ -28,7 +28,6 @@ export default defineConfig(() => {
       rollupOptions: {
         output: {
           manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
             'vendor-recharts': ['recharts'],
             'vendor-turf': ['@turf/turf'],
             'vendor-lucide': ['lucide-react'],

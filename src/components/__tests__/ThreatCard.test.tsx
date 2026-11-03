@@ -8,6 +8,9 @@ describe('ThreatCard UI Component', () => {
     const mockAlert = {
       id: '123',
       event: 'TORNADO WARNING',
+      areaDesc: 'Cleveland, OK',
+      expires: new Date(Date.now() + 3600000).toISOString(),
+      threatLevel: 'Extreme' as const,
       severity: 'Extreme',
       isDirectHit: true,
       minDist: 0,
@@ -15,6 +18,7 @@ describe('ThreatCard UI Component', () => {
       keywords: { emergency: true, pds: true },
       headline: 'PARTICULARLY DANGEROUS SITUATION',
       description: 'A large and destructive tornado...',
+      geometry: { type: 'Polygon', coordinates: [] },
       geometryCoordinates: [],
     };
     
@@ -30,6 +34,9 @@ describe('ThreatCard UI Component', () => {
     const mockAlert = {
       id: '124',
       event: 'TORNADO WATCH',
+      areaDesc: 'Oklahoma, OK',
+      expires: new Date(Date.now() + 7200000).toISOString(),
+      threatLevel: 'Moderate' as const,
       severity: 'Moderate',
       isDirectHit: true, // Assuming the user is inside the watch box
       minDist: 0,
@@ -37,6 +44,7 @@ describe('ThreatCard UI Component', () => {
       keywords: {},
       headline: 'CONDITIONS ARE FAVORABLE',
       description: '...',
+      geometry: null,
       geometryCoordinates: [],
     };
     
@@ -53,6 +61,9 @@ describe('ThreatCard UI Component', () => {
     const mockAlert = {
       id: '125',
       event: 'TORNADO WARNING', // Must be tornado to trigger TAKE SHELTER SOON
+      areaDesc: 'McClain, OK',
+      expires: new Date(Date.now() + 1800000).toISOString(),
+      threatLevel: 'High' as const,
       severity: 'Severe',
       isDirectHit: false,
       minDist: 20, // Inside proximity warning threshold
@@ -60,6 +71,7 @@ describe('ThreatCard UI Component', () => {
       keywords: {},
       headline: '',
       description: '...',
+      geometry: { type: 'Polygon', coordinates: [] },
       geometryCoordinates: [],
     };
     

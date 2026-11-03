@@ -1,6 +1,6 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+import App from './App';
 import './index.css';
 
 // Dynamically initialize Google Analytics if VITE_GA_MEASUREMENT_ID is configured
@@ -33,21 +33,38 @@ if (container) {
   console.error("Failed to find the root element.");
 }
 
-// Register PWA service worker for home screen install capability
+// Register PWA service worker in production; unregister and purge stale caches on localhost/dev
 if ('serviceWorker' in navigator) {
-  const registerSW = () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        console.log('DAISY ServiceWorker successfully registered on scope:', registration.scope);
-      })
-      .catch((error) => {
-        console.warn('DAISY ServiceWorker registration failed:', error);
-      });
-  };
+  const isLocalhost =
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    Boolean((import.meta as any).env?.DEV);
 
-  if (document.readyState === 'complete') {
-    registerSW();
+  if (isLocalhost) {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations.forEach((reg) => reg.unregister());
+    });
+    if ('caches' in window) {
+      caches.keys().then((keys) => {
+        keys.forEach((key) => caches.delete(key));
+      });
+    }
   } else {
-    window.addEventListener('load', registerSW);
+    const registerSW = () => {
+      const swUrl = `${(import.meta as any).env?.BASE_URL || '/'}sw.js`;
+      navigator.serviceWorker.register(swUrl)
+        .then((registration) => {
+          console.log('DAISY ServiceWorker successfully registered on scope:', registration.scope);
+        })
+        .catch((error) => {
+          console.warn('DAISY ServiceWorker registration failed:', error);
+        });
+    };
+
+    if (document.readyState === 'complete') {
+      registerSW();
+    } else {
+      window.addEventListener('load', registerSW);
+    }
   }
 }

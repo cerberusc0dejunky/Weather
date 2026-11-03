@@ -3,7 +3,6 @@ import { LocationAsset, NWSAlert, MesoscaleDiscussion, RotationPin } from '../ty
 import { getDistance, getBearing, getGeometryCentroid, getMemoizedMinPolygonDistance } from '../utils/geoUtils';
 import { Compass, Eye, Shield, MapPin, Layers, RefreshCcw, Globe, CloudRain, Wind, Search, Navigation, Info } from 'lucide-react';
 import { useWindyFailsafe } from '../utils/useWindyFailsafe';
-import { runMlInference } from '../utils/mlEngine';
 
 // Helper to convert cardinal directions or degrees into azimuth bearing degrees
 function getDegreesFromDirection(dirStr: string): number | null {
@@ -202,94 +201,6 @@ export default function RadarMap({
     };
   }, [onSetCoordinates]);
 
-  // Dynamically link Storm Chaser Probe trigger to global window
-  useEffect(() => {
-    window.onStormChaseProbe = async (lat: number, lon: number) => {
-      const probeContainer = document.getElementById('chase-probe-ui');
-      if (!probeContainer) return;
-      
-      probeContainer.innerHTML = `
-        <div class="animate-pulse flex flex-col items-center justify-center py-2">
-          <div class="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mb-1.5"></div>
-          <p class="text-[9px] text-cyan-600 font-bold tracking-widest uppercase">Probing Atmosphere...</p>
-        </div>
-      `;
-
-      try {
-        const pointKey = localStorage.getItem('daisy-windy-point-key') || import.meta.env.VITE_WINDY_POINT_KEY;
-        if (!pointKey) {
-          probeContainer.innerHTML = '<div class="text-[9px] text-red-500 font-bold text-center mt-2">API KEY REQUIRED</div>';
-          return;
-        }
-
-        const isUS = lat > 24 && lat < 50 && lon > -125 && lon < -66;
-        let model = isUS ? 'namConus' : 'gfs';
-
-        const body = {
-          lat, lon, model,
-          parameters: ["temp", "dewpoint", "wind", "gust", "pressure", "cape", "precip"],
-          levels: ["surface"], key: pointKey.trim()
-        };
-
-        const reqHeaders = {
-          'Content-Type': 'application/json',
-          'x-api-key': pointKey.trim(),
-          'key': pointKey.trim()
-        };
-
-        let res = await fetch(`https://api.windy.com/api/point-forecast/v2?key=${pointKey.trim()}`, {
-          method: "POST",
-          headers: reqHeaders,
-          body: JSON.stringify(body)
-        });
-
-        if (!res.ok && model !== 'gfs') {
-          body.model = 'gfs';
-          res = await fetch(`https://api.windy.com/api/point-forecast/v2?key=${pointKey.trim()}`, {
-            method: "POST",
-            headers: reqHeaders,
-            body: JSON.stringify(body)
-          });
-        }
-
-        if (!res.ok) throw new Error("API failed");
-        const data = await res.json();
-        
-        const capeVal = data.cape?.["surface"]?.[0] || 0;
-        const dewVal = data.dewpoint?.["surface"]?.[0] || 285;
-        const windVal = data.wind?.["surface"]?.[0] || 5;
-        
-        const dewPointF = (dewVal - 273.15) * 9/5 + 32;
-        const windMph = windVal * 2.23694;
-
-
-        const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
-
-        if (result) {
-          probeContainer.innerHTML = `
-            <div class="mt-2.5 pt-2 border-t border-slate-100 space-y-1">
-              <div class="flex justify-between items-center text-[10px]">
-                <span class="text-slate-500 font-semibold">TORNADOGENESIS</span>
-                <span class="font-black ${result.tornadoProbability > 30 ? 'text-red-500' : 'text-cyan-600'}">${result.tornadoProbability}%</span>
-              </div>
-              <div class="flex justify-between items-center text-[10px]">
-                <span class="text-slate-500 font-semibold">SFC CAPE</span>
-                <span class="font-bold text-slate-700">${Math.round(capeVal)} J/kg</span>
-              </div>
-              <div class="flex justify-between items-center text-[10px]">
-                <span class="text-slate-500 font-semibold">SHEAR</span>
-                <span class="font-bold text-slate-700">${Math.round(windMph)} MPH</span>
-              </div>
-            </div>
-          `;
-        }
-      } catch (err) {
-        probeContainer.innerHTML = '<div class="text-[9px] text-red-500 font-bold uppercase text-center mt-2">TELEMETRY FAILED</div>';
-      }
-    };
-    return () => { delete window.onStormChaseProbe; };
-  }, []);
-
   // Geocode location search utilizing Nominatim (failsafe free API)
   const handleGeoSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -408,19 +319,16 @@ export default function RadarMap({
 
     let isSuccess = false;
     
-    // Set 4-second timeout to transition to failsafe if windyInit callback never triggers
+    // Set 3.5-second timeout to transition cleanly to failsafe Leaflet + NEXRAD if windyInit callback never triggers (e.g., key restricted/expired)
     const bootTimeout = setTimeout(() => {
       if (!isSuccess) {
-        console.warn('[RadarMap] windyInit callback timed out (4s).');
-        if (retryCount < 5) {
-          console.log(`[RadarMap] Retrying Windy initialization (retry ${retryCount + 1}/5)...`);
-          setRetryCount(prev => prev + 1);
-        } else {
-          console.error('[RadarMap] Max retries reached. Switching to failsafe Leaflet map.');
-          setInitError(true);
+        console.warn('[RadarMap] windyInit callback timed out. Switching to failsafe Leaflet + NEXRAD radar map.');
+        if (container) {
+          container.innerHTML = '';
         }
+        setInitError(true);
       }
-    }, 4000);
+    }, 3500);
 
     try {
       const windyKey = customMapKey || localStorage.getItem('daisy-windy-map-key') || (import.meta as any).env?.VITE_WINDY_MAP_KEY;
@@ -863,23 +771,13 @@ export default function RadarMap({
 
       map.on('click', (e: any) => {
         const { lat, lng } = e.latlng;
-        
-        if (e.originalEvent.shiftKey && window.onStormChaseSync) {
-          window.onStormChaseSync(lat, lng);
-          return;
-        }
 
-        const popup = L.popup()
+        L.popup()
           .setLatLng(e.latlng)
           .setContent(`
             <div class="text-slate-950 font-sans p-2 min-w-[170px] leading-tight">
-              <div class="font-black text-[11px] uppercase text-slate-800 flex items-center gap-1">STORM CHASE TARGET</div>
+              <div class="font-black text-[11px] uppercase text-slate-800 flex items-center gap-1">COORDINATE PROBE</div>
               <p class="text-[10px] text-slate-500 font-mono mt-1 font-semibold">${lat.toFixed(5)}, ${lng.toFixed(5)}</p>
-              
-              <div id="chase-probe-ui" class="my-2 min-h-[40px]">
-                <!-- Probe UI will be injected here by App.tsx -->
-              </div>
-
               <div class="mt-2.5 pt-2 border-t border-slate-100">
                 <button onclick="window.onMapSetCoordinates?.(${lat}, ${lng})" class="w-full px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[9px] rounded uppercase cursor-pointer border-none shadow-sm transition-colors">
                   Set As Primary Gateway
@@ -888,11 +786,6 @@ export default function RadarMap({
             </div>
           `)
           .openOn(map);
-
-        // Immediately deploy the probe to fetch localized metrics for this spot
-        if (window.onStormChaseProbe) {
-          window.onStormChaseProbe(lat, lng);
-        }
       });
       }
     } catch (e) {
@@ -910,14 +803,14 @@ export default function RadarMap({
       }
 
       // 1.5. Check overlay map mode and add solid, premium tile layers as fallback/primary if Windy CDN or server encounters strict CSP boundaries
-      if (mapMode === 'radar') {
+      if (mapMode === 'radar' && (initError || !windyStoreRef.current)) {
         tileLayerRef.current = L.tileLayer('https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png', {
           attribution: 'Live Weather Radar &copy; IEM NEXRAD',
           maxZoom: 18,
           opacity: reflectivityType === 'high-res' ? 0.9 : 0.65,
           className: reflectivityType === 'high-res' ? 'radar-high-res-enhanced' : 'radar-standard-rendering',
         }).addTo(map);
-      } else if (initError && (mapMode === 'wind' || mapMode === 'satellite')) {
+      } else if (initError && mapMode === 'wind') {
         tileLayerRef.current = L.tileLayer('https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes_east_conus_ch13/{z}/{x}/{y}.png', {
           attribution: 'GOES East Infrared Satellite &copy; NOAA/IEM',
           maxZoom: 18,
@@ -1092,8 +985,8 @@ export default function RadarMap({
             .bindPopup(`
               <div class="text-slate-950 font-sans p-1.5 max-w-[200px]">
                 <div class="font-extrabold text-xs text-rose-600 uppercase flex items-center gap-1">
-                  <Compass className="w-3.5 h-3.5" /> Track Milestone
-                </h5>
+                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg> Track Milestone
+                </div>
                 <p class="text-[10px] mt-1 text-slate-700 leading-snug">
                   Estimated storm core impact arrival: <b>${node.label} out</b>.
                 </p>
@@ -1138,7 +1031,7 @@ export default function RadarMap({
               <div class="text-slate-950 font-sans p-1.5 max-w-[220px]">
                 <div class="font-extrabold text-xs text-cyan-700 uppercase flex items-center gap-1">
                   Collision Path: ${asset.name}
-                </h5>
+                </div>
                 <p class="text-[10px] mt-1 text-slate-700 leading-snug font-medium">
                   Storm tracking model projects impact path intersecting this saved location.
                 </p>
@@ -1332,7 +1225,7 @@ export default function RadarMap({
             <div class="font-extrabold text-xs uppercase text-slate-900 leading-tight">${pin.eventName}</div>
             <p class="text-[9px] font-semibold text-slate-500 mt-1 uppercase">BOUNDARIES: ${pin.areaDesc}</p>
             
-            <div class="mt-2 p-2 bg-slate-50 border border-slate-150 rounded-lg">
+            <div class="mt-2 p-2 bg-slate-50 border border-slate-100 rounded-lg">
               <p class="text-[8.5px] text-slate-700 font-bold leading-normal uppercase">
                 ${popupDesc}
               </p>
@@ -1395,7 +1288,7 @@ export default function RadarMap({
             .bindPopup(`
               <div class="text-slate-950 font-sans p-2 max-w-[220px]">
                 <div class="flex items-center justify-between mb-1">
-                  <span class="px-1.5 py-0.5 rounded text-[8px] font-black text-rose-500 bg-rose-50 border border-rose-250 uppercase tracking-widest leading-none">
+                  <span class="px-1.5 py-0.5 rounded text-[8px] font-black text-rose-500 bg-rose-50 border border-rose-200 uppercase tracking-widest leading-none">
                     SEVERE HOTSPOT
                   </span>
                   <span class="text-[8px] font-black uppercase text-slate-400 font-mono">Index: ${(spot.intensity * 100).toFixed(0)}%</span>
@@ -1501,8 +1394,9 @@ export default function RadarMap({
               // Find closest warning distance
               let bestDist = 999;
               alerts.forEach((alert) => {
-                if (alert.minDist < bestDist) {
-                  bestDist = alert.minDist;
+                const d = alert.geometry?.coordinates ? (() => { const r = getMemoizedMinPolygonDistance(asset.id, asset.lat, asset.lon, alert.id, alert.geometry.coordinates); return r.isInside ? 0 : r.minDist; })() : alert.minDist;
+                if (d < bestDist) {
+                  bestDist = d;
                 }
               });
 
@@ -1530,14 +1424,14 @@ export default function RadarMap({
             <Compass className="w-4 h-4 text-rose-500 dark:text-neon-pink" /> 
             Live Radar Overlays
           </span>
-          <label className="flex items-center gap-1.5 cursor-pointer bg-white dark:bg-slate-950 border border-slate-250 dark:border-slate-800 px-2.5 py-1 rounded-full hover:border-rose-500/50 dark:hover:border-neon-pink/50 transition-all select-none">
+          <label className="flex items-center gap-1.5 cursor-pointer bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-2.5 py-1 rounded-full hover:border-rose-500/50 dark:hover:border-neon-pink/50 transition-all select-none">
             <input
               type="checkbox"
               checked={showHeatmap}
               onChange={(e) => setShowHeatmap(e.target.checked)}
               className="w-3.5 h-3.5 accent-neon-pink rounded cursor-pointer"
             />
-            <span className="text-[9px] font-black uppercase tracking-wider text-slate-505 hover:text-slate-800 dark:hover:text-slate-300">
+            <span className="text-[9px] font-black uppercase tracking-wider text-slate-500 hover:text-slate-800 dark:hover:text-slate-300">
               Threat Heatmap
             </span>
           </label>
@@ -1549,7 +1443,7 @@ export default function RadarMap({
             onClick={() => transitionMapMode('radar')}
             className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${
               mapMode === 'radar'
-                ? 'bg-slate-100 dark:bg-slate-855 border border-neon-aqua/20 dark:border-neon-aqua/40 text-cyan-700 dark:text-neon-aqua shadow-[0_0_8px_rgba(0,255,255,0.15)] dark:shadow-[0_0_8px_rgba(0,255,255,0.2)]'
+                ? 'bg-slate-100 dark:bg-slate-800 border border-neon-aqua/20 dark:border-neon-aqua/40 text-cyan-700 dark:text-neon-aqua shadow-[0_0_8px_rgba(0,255,255,0.15)] dark:shadow-[0_0_8px_rgba(0,255,255,0.2)]'
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
             }`}
           >
@@ -1562,7 +1456,7 @@ export default function RadarMap({
             onClick={() => transitionMapMode('wind')}
             className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${
               mapMode === 'wind'
-                ? 'bg-slate-100 dark:bg-slate-850 border border-neon-pink/20 dark:border-neon-pink/40 text-rose-600 dark:text-neon-pink shadow-[0_0_8px_rgba(255,105,180,0.15)] dark:shadow-[0_0_8px_rgba(255,105,180,0.2)]'
+                ? 'bg-slate-100 dark:bg-slate-800 border border-neon-pink/20 dark:border-neon-pink/40 text-rose-600 dark:text-neon-pink shadow-[0_0_8px_rgba(255,105,180,0.15)] dark:shadow-[0_0_8px_rgba(255,105,180,0.2)]'
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
             }`}
           >
@@ -1585,7 +1479,7 @@ export default function RadarMap({
               className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-wider border cursor-pointer transition-colors ${
                 reflectivityType === 'standard'
                   ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-600 dark:text-neon-aqua shadow-[0_0_6px_rgba(0,255,255,0.1)]'
-                  : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-350'
+                  : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
               }`}
             >
               Standard base dBZ
@@ -1595,7 +1489,7 @@ export default function RadarMap({
               className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-wider border cursor-pointer transition-all duration-200 ${
                 reflectivityType === 'high-res'
                   ? 'bg-rose-500/15 border-rose-500/30 text-rose-500 dark:text-neon-pink shadow-[0_0_8px_rgba(255,105,180,0.15)]'
-                  : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-350'
+                  : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
               }`}
             >
               High-Res Debris & Hook Echo Filter
@@ -1688,7 +1582,7 @@ export default function RadarMap({
                   map.setView([userLat, userLon], assets.length > 0 ? 8 : 6);
                 }
               }}
-              className="flex items-center gap-1 bg-slate-955/90 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500 rounded-xl px-3 py-1.5 shadow-2xl backdrop-blur-md text-white hover:text-cyan-400 text-[9px] font-black uppercase cursor-pointer transition-all leading-none"
+              className="flex items-center gap-1 bg-slate-950/90 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500 rounded-xl px-3 py-1.5 shadow-2xl backdrop-blur-md text-white hover:text-cyan-400 text-[9px] font-black uppercase cursor-pointer transition-all leading-none"
             >
               <Navigation className="w-3 h-3 text-cyan-400" />
               Recenter
@@ -1724,11 +1618,11 @@ export default function RadarMap({
                 <div className="space-y-1.5">
                   <div className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest">NWS Warning Boundaries</div>
                   <div className="flex items-center gap-2">
-                    <span className="w-3.5 h-1.5 bg-rose-605 bg-rose-600 rounded inline-block"></span>
+                    <span className="w-3.5 h-1.5 bg-rose-600 rounded inline-block"></span>
                     <span>Tornado Warning</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-3.5 h-1.5 bg-orange-505 bg-orange-500 rounded inline-block"></span>
+                    <span className="w-3.5 h-1.5 bg-orange-500 rounded inline-block"></span>
                     <span>Severe Thunderstorm</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1793,7 +1687,7 @@ export default function RadarMap({
         </div>
 
         {initError ? (
-          <div className="w-full h-full relative" id="fallback-leaflet-map-wrapper">
+          <div key="failsafe-map" className="w-full h-full relative" id="fallback-leaflet-map-wrapper">
             <div id="fallback-leaflet-map" className="w-full h-full map-pane-resizable"></div>
             {/* Custom HTML5 Canvas for wind particle streams */}
             {mapMode === 'wind' && (
@@ -1802,51 +1696,21 @@ export default function RadarMap({
                 className="absolute inset-0 z-[399] pointer-events-none w-full h-full"
               />
             )}
-            {/* HUD Status overlay with Diagnostics Panel */}
-            <div className="absolute top-14 left-3 z-[400] bg-slate-950/90 border border-slate-800 p-3 rounded-xl max-w-[220px] text-white shadow-2xl backdrop-blur-md">
-              <div className="flex items-center gap-1.5 text-[9px] font-bold text-cyan-400 mb-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>Failsafe Mode Active</span>
-              </div>
-              <p className="text-[8px] text-slate-405 text-slate-400 font-medium">
-                Tracking {assets.length} point anchors against {alerts.length} warning zones in failsafe Leaflet mode.
-              </p>
-              
-              <div className="mt-2.5 pt-2 border-t border-slate-850 space-y-1 text-[7.5px] font-mono text-slate-400">
-                <div className="flex justify-between">
-                  <span>DIMENSIONS:</span>
-                  <span className="text-white font-bold">{mapDimensions.width}x{mapDimensions.height}px</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>HEIGHT SAFETY:</span>
-                  <span className={mapDimensions.height >= 320 ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
-                    {mapDimensions.height >= 320 ? "SAFE (>=320px)" : "WARNING (<320px)"}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>OVERLAY:</span>
-                  <span className="text-cyan-400 font-bold uppercase">{mapMode}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>WINDY RETRIES:</span>
-                  <span className="text-rose-455 text-rose-450 font-bold">{retryCount} / 5</span>
-                </div>
-              </div>
-            </div>
             
             {/* Proximity alerts status overlay */}
             <div className="absolute bottom-3 right-3 z-[400] bg-slate-950/90 border border-slate-800 p-2.5 rounded-xl text-[9px] font-mono text-slate-300 shadow-2xl backdrop-blur-md max-w-[240px]">
-              <div className="flex justify-between font-bold text-slate-400 border-b border-slate-850 pb-1 mb-1 text-[8px]">
+              <div className="flex justify-between font-bold text-slate-400 border-b border-slate-800 pb-1 mb-1 text-[8px]">
                 <span>LOCALIZED PIN</span>
                 <span>RANGE</span>
               </div>
               {assets.length === 0 ? (
-                <div className="text-slate-500 text-center uppercase py-0.5 text-[8px]">No Monitored Pins</div>
+                <div className="text-slate-500 text-center uppercase py-0.5 text-[8px]">Active GPS Gateway</div>
               ) : (
                 assets.slice(0, 2).map(a => {
                   let bestDist = 999;
                   alerts.forEach(alert => {
-                    if (alert.minDist < bestDist) bestDist = alert.minDist;
+                    const d = alert.geometry?.coordinates ? (() => { const r = getMemoizedMinPolygonDistance(a.id, a.lat, a.lon, alert.id, alert.geometry.coordinates); return r.isInside ? 0 : r.minDist; })() : alert.minDist;
+                    if (d < bestDist) bestDist = d;
                   });
                   return (
                     <div key={a.id} className="flex justify-between gap-4 text-[9px]">
@@ -1861,7 +1725,8 @@ export default function RadarMap({
             </div>
           </div>
         ) : (
-          <div id="windy" className="w-full h-full">
+          <div key="windy-map" className="w-full h-full relative">
+            <div id="windy" className="w-full h-full"></div>
             {/* Display loader until API initialized */}
             {!apiLoaded && (
               <div className="absolute inset-0 bg-slate-950 flex flex-col justify-center items-center text-center p-6 z-20">

@@ -76,6 +76,33 @@ export function isPointInPolygon(lat: number, lon: number, polygon: [number, num
   return wn !== 0;
 }
 
+function getClosestPointOnSegment(
+  lat: number,
+  lon: number,
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): { dist: number; pt: [number, number] } {
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  const dx = (lon2 - lon1) * cosLat;
+  const dy = lat2 - lat1;
+  const lenSq = dx * dx + dy * dy;
+
+  let t = 0;
+  if (lenSq > 0) {
+    t = (((lon - lon1) * cosLat) * dx + (lat - lat1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+  }
+
+  const projLon = lon1 + t * (lon2 - lon1);
+  const projLat = lat1 + t * (lat2 - lat1);
+  return {
+    dist: getDistance(lat, lon, projLat, projLon),
+    pt: [projLon, projLat],
+  };
+}
+
 export function getMinPolygonDistance(
   assetLat: number,
   assetLon: number,
@@ -104,6 +131,22 @@ export function getMinPolygonDistance(
         const ring: [number, number][] = arr.map((pt: any) => [pt[0], pt[1]]);
         if (isPointInPolygon(assetLat, assetLon, ring)) {
           isInside = true;
+        }
+        for (let i = 0; i < ring.length; i++) {
+          const p1 = ring[i];
+          const p2 = ring[(i + 1) % ring.length];
+          const { dist, pt } = getClosestPointOnSegment(
+            assetLat,
+            assetLon,
+            p1[1],
+            p1[0],
+            p2[1],
+            p2[0]
+          );
+          if (dist < minDist) {
+            minDist = dist;
+            closestPt = pt;
+          }
         }
       }
       for (let i = 0; i < arr.length; i++) {
@@ -239,13 +282,15 @@ export const usStatesAbbr: Record<string, string> = {
 export function formatAddress(addr: any, fallback: string): string {
   if (!addr) return fallback.toUpperCase();
   const city = addr.city || addr.town || addr.village || addr.municipality || '';
+  const county = addr.county ? addr.county.replace(/ County| Parish/i, '').trim() : '';
   const state = addr.state ? (usStatesAbbr[addr.state] || addr.state.toUpperCase()) : '';
 
   if (city) {
-    return `${city}${state ? ', ' + state : ''}`.toUpperCase();
+    const countySuffix = county && county.toLowerCase() !== city.toLowerCase() ? ` (${county})` : '';
+    return `${city}${countySuffix}${state ? ', ' + state : ''}`.toUpperCase();
   }
-  if (addr.county) {
-    return `${addr.county.replace(/ County/i, '')}${state ? ', ' + state : ''}`.toUpperCase();
+  if (county) {
+    return `${county}${state ? ', ' + state : ''}`.toUpperCase();
   }
   return fallback.toUpperCase();
 }
@@ -331,10 +376,23 @@ export function getParsedPolygonMinDistance(
     return { minDist: 0, isInside: true };
   }
   
-  for (const pt of polygon) {
+  for (let i = 0; i < polygon.length; i++) {
+    const pt = polygon[i];
+    const nextPt = polygon[(i + 1) % polygon.length];
     const d = getDistance(assetLat, assetLon, pt.lat, pt.lon);
     if (d < minDist) {
       minDist = d;
+    }
+    const { dist: segDist } = getClosestPointOnSegment(
+      assetLat,
+      assetLon,
+      pt.lat,
+      pt.lon,
+      nextPt.lat,
+      nextPt.lon
+    );
+    if (segDist < minDist) {
+      minDist = segDist;
     }
   }
   

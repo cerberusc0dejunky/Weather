@@ -35,6 +35,11 @@ jobs:
 
       - name: Build DAISY (Vite/React)
         run: npm run build
+        env:
+          VITE_WINDY_MAP_KEY: ${{ secrets.VITE_WINDY_MAP_KEY }}
+          VITE_WINDY_POINT_KEY: ${{ secrets.VITE_WINDY_POINT_KEY }}
+          VITE_APPS_SCRIPT_URL: ${{ secrets.VITE_APPS_SCRIPT_URL }}
+          VITE_GA_MEASUREMENT_ID: ${{ secrets.VITE_GA_MEASUREMENT_ID }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

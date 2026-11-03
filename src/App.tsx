@@ -9,8 +9,7 @@ import {
   Tooltip,
 } from 'recharts';
 import SafeResponsiveContainer from './components/SafeResponsiveContainer';
-import { fetchChaserReports } from './utils/chaserSync';
-import { SystemSettings, NWSAlert, LocationAsset, TelemetryConditions, MesoscaleDiscussion, RotationPin, NetworkRequestLog, ChaserReport } from './types';
+import { SystemSettings, NWSAlert, LocationAsset, TelemetryConditions, MesoscaleDiscussion, RotationPin, NetworkRequestLog } from './types';
 import {
   getDistance,
   getBearing,
@@ -24,9 +23,9 @@ import {
   getParsedPolygonMinDistance,
   parseStormTrajectory,
 } from './utils/geoUtils';
-import { runMlInference } from './utils/mlEngine';
 import { syncToGoogleSheets } from './utils/googleSheetsSync';
 import ThreatCard from './components/ThreatCard';
+import WindGauge from './components/WindGauge';
 import type { ResolvedAlert } from './components/AlertHistory';
 import React, { Suspense } from 'react';
 
@@ -234,8 +233,17 @@ function PressureBaroTooltip({ active, payload }: PressureTooltipProps) {
 function translateAlertsToRotationPins(activeAlerts: NWSAlert[]): RotationPin[] {
   const pins: RotationPin[] = [];
   activeAlerts.forEach((alert) => {
+    const upperEvent = alert.event.toUpperCase();
+    if (upperEvent.includes('WATCH')) return;
+
     const fullText = `${alert.event} ${alert.description || ''} ${alert.instruction || ''} ${alert.snippet || ''}`.toUpperCase();
+    const isTornadoWarning = upperEvent.includes('TORNADO WARNING') || 
+                            upperEvent.includes('EXTREME SEVERE WEATHER');
+
     const hasRotation = alert.keywords?.rotation ||
+      alert.keywords?.funnel ||
+      alert.keywords?.possible ||
+      isTornadoWarning ||
       fullText.includes('ROTATION') ||
       fullText.includes('VELOCITY COUPLING') ||
       fullText.includes('TORNADIC') ||
@@ -245,9 +253,9 @@ function translateAlertsToRotationPins(activeAlerts: NWSAlert[]): RotationPin[] 
       fullText.includes('COUPLING');
 
     const hasObserved = alert.keywords?.observed ||
-      fullText.includes('OBSERVED') ||
-      fullText.includes('CONFIRMED') ||
       fullText.includes('TORNADO ON THE GROUND') ||
+      fullText.includes('OBSERVED TORNADO') ||
+      fullText.includes('CONFIRMED TORNADO') ||
       fullText.includes('DEBRIS SIGNATURE') ||
       fullText.includes('TORNADO DEBRIS') ||
       fullText.includes('TDS') ||
@@ -257,11 +265,8 @@ function translateAlertsToRotationPins(activeAlerts: NWSAlert[]): RotationPin[] 
       fullText.includes('TORNADO EMERGENCY') ||
       fullText.includes('PARTICULARLY DANGEROUS SITUATION') ||
       fullText.includes('PDS') ||
-      fullText.includes('CATASTROPHIC') ||
-      alert.event.toUpperCase().includes('EMERGENCY');
-
-    const isTornadoWarning = alert.event.toUpperCase().includes('TORNADO WARNING') || 
-                            alert.event.toUpperCase().includes('EXTREME SEVERE WEATHER');
+      fullText.includes('CATASTROPHIC DAMAGE THREAT') ||
+      upperEvent.includes('TORNADO EMERGENCY');
 
     if (hasRotation && alert.geometry && alert.geometry.coordinates) {
       const centroid = getGeometryCentroid(alert.geometry.coordinates);
@@ -481,218 +486,15 @@ function App() {
 
   // Potential rotation pins state derived from active alerts
   const [rotationPins, setRotationPins] = useState<RotationPin[]>([]);
-  const [chaserReports, setChaserReports] = useState<ChaserReport[]>([]);
 
-  // Keep rotationPins synchronized with active alerts and chaser reports
+  // Keep rotationPins synchronized with active alerts
   useEffect(() => {
-    const alertPins = translateAlertsToRotationPins(alerts);
-    const chaserPins: RotationPin[] = chaserReports
-      .filter(r => r.rotationVisible || r.tornadoOnGround || r.wallCloud)
-      .map(r => ({
-        id: `chaser-${r.id}`,
-        lat: r.lat,
-        lon: r.lon,
-        alertId: `chaser-report-${r.id}`,
-        eventName: r.tornadoOnGround ? 'Tornado On Ground (Chaser Verified)' : r.rotationVisible ? 'Rotation Visible (Chaser Verified)' : 'Wall Cloud (Chaser Verified)',
-        areaDesc: 'Spotter Field Report',
-        detectedAt: r.timestamp,
-        pinType: r.tornadoOnGround ? 'vortex' : 'mesocyclone',
-        threatLevel: r.tornadoOnGround ? 'Extreme' : 'Severe',
-        isObserved: true
-      }));
+    setRotationPins(translateAlertsToRotationPins(alerts));
+  }, [alerts]);
 
-    setRotationPins([...alertPins, ...chaserPins]);
-  }, [alerts, chaserReports]);
+  const syncedTornadoAlertIdsRef = useRef<Set<string>>(new Set());
 
-  // Experimental Tornadogenesis Probability Analysis States
-  const [tornadogenesisData, setTornadogenesisData] = useState<any | null>(null);
-  const [chaseTarget, setChaseTarget] = useState<any | null>(null);
-  const [isAnalyzingTelemetry, setIsAnalyzingTelemetry] = useState<boolean>(false);
-  const [isSyncingMl, setIsSyncingMl] = useState<boolean>(false);
-
-  // Live Storm Event Capture Console states
-  const [isRecording, setIsRecording] = useState<boolean>(() => {
-    return localStorage.getItem('daisy-is-recording') === 'true';
-  });
-  const [recordedSnapshots, setRecordedSnapshots] = useState<any[]>(() => {
-    const raw = localStorage.getItem('daisy-recorded-snapshots');
-    return raw ? JSON.parse(raw) : [];
-  });
-
-  useEffect(() => {
-    localStorage.setItem('daisy-is-recording', String(isRecording));
-  }, [isRecording]);
-
-  useEffect(() => {
-    localStorage.setItem('daisy-recorded-snapshots', JSON.stringify(recordedSnapshots));
-  }, [recordedSnapshots]);
-
-  useEffect(() => {
-    if (!isRecording) return;
-
-    // Capture first snapshot immediately
-    const captureSnapshot = async () => {
-      const timestamp = new Date().toISOString();
-      const currentSnapshot = {
-        timestamp,
-        lat: currentLat,
-        lon: currentLon,
-        temperature: telemetry?.tempF || 'N/A',
-        dewPoint: telemetry?.dewPointF || 'N/A',
-        humidity: telemetry?.humidity || 'N/A',
-        windSpeed: telemetry?.windMph || 'N/A',
-        windGust: telemetry?.windGustMph || 'N/A',
-        windDirection: telemetry?.windDir || 'N/A',
-        pressure: telemetry?.pressureHpa || 'N/A',
-        cape: telemetry?.cape || 0,
-        tornadoProbability: tornadogenesisData?.genesis_probability_pct || 0,
-        downburstRisk: tornadogenesisData?.downburst_risk || 'None',
-        activeAlertsCount: alerts.length,
-        rotationPinsCount: rotationPins.length
-      };
-
-      setRecordedSnapshots((prev) => [...prev, currentSnapshot]);
-
-      try {
-        await syncToGoogleSheets({
-          latitude: currentLat,
-          longitude: currentLon,
-          lat: currentLat,
-          lon: currentLon,
-          alerts,
-          rotationPins,
-          telemetry,
-          geminiReport: `[SESSION CAPTURE] Tornadogenesis: ${tornadogenesisData?.genesis_probability_pct || 0}% | CAPE: ${telemetry?.cape || 0} J/kg`,
-        });
-      } catch (e) {
-        console.error('[Session Capture Sync Fail]', e);
-      }
-    };
-
-    // Capture every 2 minutes (120000 ms) while active
-    const captureInterval = setInterval(captureSnapshot, 120000);
-
-    return () => clearInterval(captureInterval);
-  }, [isRecording, currentLat, currentLon, telemetry, tornadogenesisData, alerts, rotationPins]);
-
-  const handleExportSessionLog = () => {
-    if (recordedSnapshots.length === 0) return;
-
-    let mdContent = `# Storm Event Capture Log\n\n`;
-    mdContent += `* **Initial Position**: ${currentLat.toFixed(4)}, ${currentLon.toFixed(4)}\n`;
-    mdContent += `* **Start Time**: ${new Date(recordedSnapshots[0].timestamp).toLocaleString()}\n`;
-    mdContent += `* **End Time**: ${new Date(recordedSnapshots[recordedSnapshots.length - 1].timestamp).toLocaleString()}\n`;
-    mdContent += `* **Total Intervals Captured**: ${recordedSnapshots.length}\n\n`;
-
-    mdContent += `## Telemetry Evolution Table\n\n`;
-    mdContent += `| Timestamp | Coords | Temp (°F) | Dew Point (°F) | CAPE (J/kg) | Wind (mph) | Tornado Prob (%) | Downburst Risk |\n`;
-    mdContent += `| --- | --- | --- | --- | --- | --- | --- | --- |\n`;
-
-    recordedSnapshots.forEach((snap) => {
-      const timeStr = new Date(snap.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      mdContent += `| ${timeStr} | ${snap.lat.toFixed(2)}, ${snap.lon.toFixed(2)} | ${snap.temperature} | ${snap.dewPoint} | ${snap.cape} | ${snap.windSpeed} (G ${snap.windGust}) | ${snap.tornadoProbability}% | ${snap.downburstRisk} |\n`;
-    });
-
-    mdContent += `\n## Tactical Analysis Summary\n`;
-    const capes = recordedSnapshots.map(s => typeof s.cape === 'number' ? s.cape : 0);
-    const maxCape = capes.length > 0 ? Math.max(...capes) : 0;
-    const probs = recordedSnapshots.map(s => s.tornadoProbability || 0);
-    const maxProb = probs.length > 0 ? Math.max(...probs) : 0;
-
-    mdContent += `* **Maximum Recorded Instability (CAPE)**: ${maxCape} J/kg\n`;
-    mdContent += `* **Maximum Tornadogenesis Probability**: ${maxProb}%\n`;
-    
-    // Create download link
-    const blob = new Blob([mdContent], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Storm_Capture_Log_${new Date().toISOString().split('T')[0]}.md`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    
-    triggerToast('Session log exported as Markdown!', 'success');
-  };
-
-  // Live ML Engine Inference
-  useEffect(() => {
-    if (!rotationPins || rotationPins.length === 0) {
-      setTornadogenesisData(null);
-      setIsAnalyzingTelemetry(false);
-      return;
-    }
-
-    const runInference = async () => {
-      setIsAnalyzingTelemetry(true);
-      try {
-        const rawCape = windyPointTelemetry?.cape || (telemetry?.temperatureC && telemetry?.dewpointC ? 1500 : 0);
-        const rawDewPoint = telemetry?.dewpointC 
-          ? (telemetry.dewpointC * 9/5) + 32 
-          : (windyPointTelemetry?.dewpoint !== undefined ? windyPointTelemetry.dewpoint : 55);
-        const rawShearMph = telemetry?.windSpeedKmH 
-          ? telemetry.windSpeedKmH * 0.621371 
-          : (windyPointTelemetry?.wind !== undefined ? windyPointTelemetry.wind : 15);
-
-        const cape = Number(rawCape) || 0;
-        const dewPoint = Number(rawDewPoint) || 0;
-        const shearMph = Number(rawShearMph) || 0;
-
-        const result = await runMlInference({
-          cape,
-          dewPoint,
-          shearMph,
-          rotationPins,
-          chaserReports
-        });
-
-        if (result !== null) {
-          setTornadogenesisData({
-            genesis_probability_pct: result.tornadoProbability,
-            downburst_risk: result.downburstRisk,
-            diagnostic_reflection: result.diagnosticReflection,
-            display_message: 'Atmospheric telemetry columns analyzed by Local ML Engine.',
-            metrics: {
-              moisture: `Dewpoint: ${dewPoint.toFixed(1)}F`,
-              instability: `CAPE: ${Math.round(cape)} J/kg`,
-              lift: 'Live Front Boundary Tracking',
-              shear: `Surface Shear: ${shearMph.toFixed(1)} MPH`
-            }
-          });
-        }
-      } catch (err) {
-        console.error("ML Inference error:", err);
-      } finally {
-        setIsAnalyzingTelemetry(false);
-      }
-    };
-
-    runInference();
-  }, [telemetry, windyPointTelemetry, rotationPins, chaserReports]);
-
-  // Poll for Chaser Reports
-  useEffect(() => {
-    const pollChasers = async () => {
-      try {
-        const reports = await fetchChaserReports();
-        setChaserReports(reports);
-      } catch (err) {
-        console.error('Error polling chaser reports', err);
-      }
-    };
-    pollChasers();
-    const interval = setInterval(pollChasers, 30000); // Poll every 30s
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleSyncMl = async (isAuto = false) => {
-    if (!isAuto) {
-      setIsSyncingMl(true);
-      triggerToast('Sending ML Snapshot to Google Sheets...', 'info');
-    } else {
-      triggerToast('Auto-archiving expired alert telemetry to Sheets...', 'info');
-    }
+  const handleSyncToSheets = async (reason = 'Tornado Alert Telemetry') => {
     try {
       await syncToGoogleSheets({
         latitude: currentLat,
@@ -702,20 +504,41 @@ function App() {
         alerts,
         rotationPins,
         telemetry,
-        geminiReport: `Tornadogenesis Probability: ${tornadogenesisData?.genesis_probability_pct || 0}%`,
+        geminiReport: `[${reason}] Temp: ${telemetry?.temperature || windyPointTelemetry?.temp || 'N/A'}F | Dew: ${telemetry?.dewPoint || windyPointTelemetry?.dewpoint || 'N/A'}F | Wind: ${telemetry?.windSpeed || windyPointTelemetry?.wind || 'N/A'} mph | Pres: ${telemetry?.pressure || windyPointTelemetry?.pressure || 'N/A'} InHg | CAPE: ${windyPointTelemetry?.cape ?? 0} J/kg`,
       });
-      if (!isAuto) triggerToast('ML Snapshot synced to Sheets!', 'success');
     } catch (err: any) {
-      triggerToast(`Sync failed: ${err.message}`, 'error');
-    } finally {
-      if (!isAuto) setIsSyncingMl(false);
+      console.warn('[Sheets Sync Fail]', err);
     }
   };
 
-  const handleSyncMlRef = useRef(handleSyncMl);
+  const handleSyncMlRef = useRef(handleSyncToSheets);
   useEffect(() => {
-    handleSyncMlRef.current = handleSyncMl;
-  }, [handleSyncMl]);
+    handleSyncMlRef.current = handleSyncToSheets;
+  }, [handleSyncToSheets]);
+
+  // Automatically capture and sync metrics to Google Sheets when an NWS alert with a tornado trigger word is intercepted in proximity
+  useEffect(() => {
+    const activeTornadoAlerts = alerts.filter((a) => {
+      const upperEvent = a.event.toUpperCase();
+      const isWatch = upperEvent.includes('WATCH');
+      const hasTornadoTrigger =
+        !isWatch &&
+        (upperEvent.includes('TORNADO WARNING') ||
+          a.keywords.emergency ||
+          a.keywords.observed ||
+          a.keywords.rotation ||
+          a.keywords.funnel ||
+          a.keywords.possible);
+      return (a.isDirectHit || a.minDist <= settings.monitorRadius) && hasTornadoTrigger;
+    });
+
+    activeTornadoAlerts.forEach((alert) => {
+      if (!syncedTornadoAlertIdsRef.current.has(alert.id)) {
+        syncedTornadoAlertIdsRef.current.add(alert.id);
+        handleSyncMlRef.current(`Active Tornado Trigger: ${alert.event}`);
+      }
+    });
+  }, [alerts, settings.monitorRadius]);
 
   // User notifications toast system (replacing iframe-blocked alert popups)
   const [notificationToast, setNotificationToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
@@ -771,7 +594,7 @@ function App() {
     setPressureHistory([]);
   }, [telemetry?.stationId]);
 
-  // Sirens trigger lifecycle sync
+  // Sirens trigger lifecycle sync — only activates when an intercepted NWS alert in proximity contains a tornado trigger word
   useEffect(() => {
     if (!armed) {
       siren.stop();
@@ -780,10 +603,23 @@ function App() {
 
     let maxLevel = 0;
     alerts.forEach((alert) => {
-      if (alert.isDirectHit || alert.minDist <= settings.monitorRadius) {
-        if (alert.keywords.emergency) maxLevel = Math.max(maxLevel, 3);
-        else if (alert.event.includes('WARNING')) maxLevel = Math.max(maxLevel, 2);
-        else if (alert.event.includes('WATCH')) maxLevel = Math.max(maxLevel, 1);
+      const upperEvent = alert.event.toUpperCase();
+      const isWatch = upperEvent.includes('WATCH');
+      const hasTornadoTrigger =
+        !isWatch &&
+        (upperEvent.includes('TORNADO WARNING') ||
+          alert.keywords.rotation ||
+          alert.keywords.funnel ||
+          alert.keywords.observed ||
+          alert.keywords.possible ||
+          alert.keywords.emergency);
+
+      if ((alert.isDirectHit || alert.minDist <= settings.monitorRadius) && hasTornadoTrigger) {
+        if (alert.keywords.emergency || alert.keywords.observed) {
+          maxLevel = Math.max(maxLevel, 3);
+        } else {
+          maxLevel = Math.max(maxLevel, 2);
+        }
       }
     });
 
@@ -844,8 +680,21 @@ function App() {
           addAlertsToHistoryRef.current(expired);
           triggerToast(`${expired.length} threat${expired.length > 1 ? "s" : ""} expired and archived.`, "info");
           
-          // Auto-trigger Google Sheets sync with the final telemetry metrics
-          handleSyncMlRef.current(true);
+          // Auto-trigger Google Sheets sync with the final telemetry metrics if any expired alert had tornado trigger words
+          if (
+            expired.some(
+              (a) =>
+                !a.event.toUpperCase().includes('WATCH') &&
+                (a.event.toUpperCase().includes('TORNADO WARNING') ||
+                  a.keywords.emergency ||
+                  a.keywords.observed ||
+                  a.keywords.rotation ||
+                  a.keywords.funnel ||
+                  a.keywords.possible)
+            )
+          ) {
+            handleSyncMlRef.current('Expired Tornado Alert Telemetry');
+          }
 
           return prevAlerts.filter((alert) => !alert.expires || new Date(alert.expires) > now);
         }
@@ -855,112 +704,6 @@ function App() {
 
     const interval = setInterval(checkExpiredAlerts, 5000);
     return () => clearInterval(interval);
-  }, []);
-
-  // Dynamically link Storm Chaser Probe to global window
-  useEffect(() => {
-    window.onStormChaseProbe = async (lat: number, lon: number) => {
-      setChaseTarget({ lat, lon, loading: true });
-      try {
-        const pointKey = localStorage.getItem('daisy-windy-point-key') || (import.meta as any).env?.VITE_WINDY_POINT_KEY;
-        if (!pointKey) {
-          triggerToast('Windy API Key required for Storm Chase Probe.', 'error');
-          setChaseTarget({ lat, lon, loading: false, error: true });
-          return;
-        }
-
-        const body = {
-          lat, lon, model: "gfs",
-          parameters: ["temp", "dewpoint", "wind", "gust", "pressure", "cape", "precip"],
-          levels: ["surface"], key: pointKey
-        };
-
-        const res = await fetch("https://api.windy.com/api/point-forecast/v2", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-        });
-
-        if (!res.ok) throw new Error("API failed");
-        const data = await res.json();
-        
-        const capeVal = data.cape?.["surface"]?.[0] || 0;
-        const dewVal = data.dewpoint?.["surface"]?.[0] || 285;
-        const windVal = data.wind?.["surface"]?.[0] || 5;
-        const dewPointF = (dewVal - 273.15) * 9/5 + 32;
-        const windMph = windVal * 2.23694;
-
-
-        const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
-
-        setChaseTarget({
-          lat, lon, loading: false,
-          data: {
-            cape: Math.round(capeVal),
-            shear: Math.round(windMph),
-            dewpoint: Math.round(dewPointF),
-            tornadoProb: result ? result.tornadoProbability : 0,
-            downburstRisk: result ? result.downburstRisk : 0
-          }
-        });
-      } catch (err) {
-        setChaseTarget({ lat, lon, loading: false, error: true });
-      }
-    };
-    return () => { delete window.onStormChaseProbe; };
-  }, []);
-
-  // Dynamically link Storm Chaser Sync (Shift+Click) to global window
-  useEffect(() => {
-    window.onStormChaseSync = async (lat: number, lon: number) => {
-      triggerToast(`Scanning [${lat.toFixed(2)}, ${lon.toFixed(2)}]...`, 'info');
-      try {
-        const pointKey = localStorage.getItem('daisy-windy-point-key') || (import.meta as any).env?.VITE_WINDY_POINT_KEY;
-        if (!pointKey) {
-          triggerToast('Windy API Key required for Storm Chase Sync.', 'error');
-          return;
-        }
-
-        const body = {
-          lat, lon, model: "gfs",
-          parameters: ["temp", "dewpoint", "wind", "gust", "pressure", "cape", "precip"],
-          levels: ["surface"], key: pointKey
-        };
-
-        const res = await fetch("https://api.windy.com/api/point-forecast/v2", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-        });
-
-        if (!res.ok) throw new Error("API failed");
-        const data = await res.json();
-        
-        const capeVal = data.cape?.["surface"]?.[0] || 0;
-        const dewVal = data.dewpoint?.["surface"]?.[0] || 285;
-        const windVal = data.wind?.["surface"]?.[0] || 5;
-        const dewPointF = (dewVal - 273.15) * 9/5 + 32;
-        const windMph = windVal * 2.23694;
-
-
-        const result = await runMlInference({ cape: capeVal, dewPoint: dewPointF, shearMph: windMph, rotationPins: [] });
-
-        const syncData = {
-          lat: lat,
-          lon: lon,
-          alerts: [],
-          rotationPins: [],
-          telemetry: null,
-          geminiReport: result ? result.tornadoProbability + "%" : "Unknown"
-        };
-
-        const success = await syncToGoogleSheets(syncData as any);
-        if (success) {
-          triggerToast(`Sent telemetry for [${lat.toFixed(2)}, ${lon.toFixed(2)}] to Sheets!`, 'success');
-        } else {
-          triggerToast(`Failed to sync [${lat.toFixed(2)}, ${lon.toFixed(2)}]. Check Webhook URL.`, 'error');
-        }
-      } catch (err) {
-        triggerToast(`Telemetry fetch failed for [${lat.toFixed(2)}, ${lon.toFixed(2)}]`, 'error');
-      }
-    };
-    return () => { delete window.onStormChaseSync; };
   }, []);
 
   // Perform purely local geometric calculations for discussions on coordinate or custom changes without redundant network requests
@@ -1004,18 +747,170 @@ function App() {
     setDiscussions(processedMDs);
   }, [rawApiDiscussions, customMDs, assets, currentLat, currentLon]);
 
+  // Derive Atmospheric stability & Storm Bypass Probability trends based on 6-Hour historical and forecast data
+  const forecastTrend = (() => {
+    const hasPressure = pressureHistory && pressureHistory.length >= 2;
+    const hasCape = capeHistory && capeHistory.length >= 2;
+
+    if (!hasPressure && !hasCape) {
+      return {
+        status: 'Trend: Stable',
+        statusDesc: 'Synchronizing regional surface pressure sensors and convective profiles. Active coordinate targets currently reflect thermodynamically stable layers.',
+        bypassChance: 'N/A',
+        badgeColor: 'border-slate-300 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 text-slate-500',
+        textColor: 'text-slate-500',
+        shadowColor: '',
+        trendLabel: 'Awaiting polling records to calculate local storm bypass risk indices.',
+        pressureDeltaText: 'Measuring...',
+        capeDeltaText: 'Measuring...',
+        pressureDirection: 'Stable',
+        capeDirection: 'Stable',
+        deltaPressure: 0,
+        maxCapeVal: 0,
+        currentCapeVal: 0,
+        isUnstable: false,
+        isStable: true
+      };
+    }
+
+    // 1. Calculate pressure trend over available polling ticks
+    let deltaPressure = 0;
+    let pressureDirection = 'Steady';
+    if (hasPressure) {
+      const earliestP = pressureHistory[0].pressure;
+      const latestP = pressureHistory[pressureHistory.length - 1].pressure;
+      deltaPressure = latestP - earliestP;
+      if (deltaPressure < -0.04) {
+        pressureDirection = 'Falling Rapidly';
+      } else if (deltaPressure < -0.01) {
+        pressureDirection = 'Falling';
+      } else if (deltaPressure > 0.04) {
+        pressureDirection = 'Rising Rapidly';
+      } else if (deltaPressure > 0.01) {
+        pressureDirection = 'Rising';
+      }
+    }
+
+    // 2. Calculate CAPE trend over historical and predictive points
+    const currentCapeVal = windyPointTelemetry?.cape !== undefined 
+      ? windyPointTelemetry.cape 
+      : (capeHistory.length > 0 ? capeHistory[capeHistory.length - 1].cape : 0);
+    const maxCapeVal = capeHistory.length > 0 ? Math.max(...capeHistory.map(p => p.cape)) : currentCapeVal;
+    
+    let capeDirection = 'Stable';
+    if (hasCape) {
+      const earliestC = capeHistory[0].cape;
+      const latestC = currentCapeVal;
+      const deltaCape = latestC - earliestC;
+      if (deltaCape > 300) {
+        capeDirection = 'Increasing Instability';
+      } else if (deltaCape < -300) {
+        capeDirection = 'Stabilizing';
+      }
+    }
+
+    // 3. Synthesize stability trends into direct storm bypass metrics
+    let status = 'Trend: Stable';
+    let statusDesc = 'Approaching storms are highly likely to weaken, dissipate, or split and go around your selected locations due to low atmospheric fuel.';
+    let bypassChance = 'High (80% - 90% Bypass)';
+    let badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400';
+    let textColor = 'text-emerald-700 dark:text-emerald-400';
+    let shadowColor = 'shadow-[0_4px_20px_rgba(16,185,129,0.05)]';
+    let trendLabel = 'Stable Atmosphere / Storm Dissipation Mode';
+    let isUnstable = false;
+    let isStable = true;
+    
+    const pressureDeltaText = `${deltaPressure >= 0 ? '+' : ''}${deltaPressure.toFixed(2)} InHg`;
+    const capeDeltaText = `${maxCapeVal} J/kg Peak`;
+
+    // Case 1: Extreme Instability / Active Destabilizing Environment
+    if (deltaPressure < -0.015 && (maxCapeVal > 1500 || capeDirection === 'Increasing Instability')) {
+      status = 'Trend: Rapidly Destabilizing';
+      statusDesc = 'Atmospheric pressure is dropping rapidly while convective energy rises. Storm cells entering this workspace are highly likely to maintain severity or intensify to direct hits.';
+      bypassChance = 'Minimal (5% - 15% Bypass)';
+      badgeColor = 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400';
+      textColor = 'text-rose-600 dark:text-rose-400';
+      shadowColor = 'shadow-[0_4px_20px_rgba(239,68,68,0.08)]';
+      trendLabel = 'Severe Instability / High Storm Maintenance Air Mass';
+      isUnstable = true;
+      isStable = false;
+    }
+    // Case 2: Thermodynamically Stable (Low CAPE)
+    else if (maxCapeVal < 300 && deltaPressure >= -0.01) {
+      status = 'Trend: Stable';
+      statusDesc = 'Local microclimate lacks convective buoyancy and thermal moisture (CAPE < 300). Approaching convective cells usually lose internal convection and divert path or go around you.';
+      bypassChance = 'Very High (90% - 95% Bypass)';
+      badgeColor = 'bg-teal-500/10 border-teal-500 text-teal-600 dark:text-neon-aqua';
+      textColor = 'text-teal-600 dark:text-neon-aqua';
+      shadowColor = 'shadow-[0_4px_20px_rgba(20,184,166,0.05)]';
+      trendLabel = 'Atmospheric Shield / Severe Weather Unfavorable';
+      isUnstable = false;
+      isStable = true;
+    }
+    // Case 3: Storm Decaying / Cool Stabilization
+    else if (deltaPressure > 0.01 || (capeDirection === 'Stabilizing' && maxCapeVal < 1000)) {
+      status = 'Trend: Stabilizing';
+      statusDesc = 'Pressure is rising or CAPE indices are actively cooling down, indicating the storm engine is choked of convective potential. Incoming cells are expected to weaken or decay.';
+      bypassChance = 'High (70% - 85% Bypass)';
+      badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400';
+      textColor = 'text-emerald-700 dark:text-emerald-400';
+      shadowColor = 'shadow-[0_4px_20px_rgba(16,185,129,0.05)]';
+      trendLabel = 'Positive Pressure Drift / Convective Decay';
+      isUnstable = false;
+      isStable = true;
+    }
+    // Case 4: Moderately Unstable / Dynamic Course Changes
+    else {
+      status = 'Trend: Moderately Unstable';
+      statusDesc = 'Atmospheric parameters support moderate convective support (CAPE ~800-1500). Alert paths may wobble, shift, or decay, making trajectory tracking crucial.';
+      bypassChance = 'Moderate (45% - 60% Bypass)';
+      badgeColor = 'bg-amber-500/10 border-amber-500 text-amber-600 dark:text-amber-400';
+      textColor = 'text-amber-600 dark:text-amber-400';
+      shadowColor = 'shadow-[0_4px_20px_rgba(245,158,11,0.05)]';
+      trendLabel = 'Dynamic Convective Corridor / Ongoing Maintenance';
+      isUnstable = true;
+      isStable = false;
+    }
+
+    return {
+      status,
+      statusDesc,
+      bypassChance,
+      badgeColor,
+      textColor,
+      shadowColor,
+      trendLabel,
+      pressureDeltaText,
+      capeDeltaText,
+      pressureDirection,
+      capeDirection,
+      deltaPressure,
+      maxCapeVal,
+      currentCapeVal,
+      isUnstable,
+      isStable
+    };
+  })();
+
+  const rawNwsFeaturesRef = useRef<any[]>([]);
+  const pointDirectHitIdsRef = useRef<Set<string>>(new Set());
+
   // Core NWS Alert Acquisition Engine (Layer 1 The Alarm)
   const fetchNationalAlerts = async () => {
     setSyncStatus('SYNCING...');
     const encodedEvents = TRACKED_ALERTS_FILTER.map((e) => encodeURIComponent(e)).join(',');
     const nwsUrl = `https://api.weather.gov/alerts/active?event=${encodedEvents}`;
+    const pointUrl = `https://api.weather.gov/alerts/active?point=${currentLat.toFixed(4)},${currentLon.toFixed(4)}`;
     const headers = {
       'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)',
       'Accept': 'application/geo+json'
     };
 
     try {
-      const res = await fetch(nwsUrl, { headers });
+      const [res, ptRes] = await Promise.all([
+        fetch(nwsUrl, { headers }),
+        fetch(pointUrl, { headers }).catch(() => null),
+      ]);
       
       logNetworkRequest({
         service: 'NWS',
@@ -1027,9 +922,22 @@ function App() {
       });
 
       if (!res.ok) throw new Error(`API Error: ${res.status}`);
+
+      if (ptRes && ptRes.ok) {
+        try {
+          const ptPayload = await ptRes.json();
+          const ptFeatures = ptPayload.features || [];
+          pointDirectHitIdsRef.current = new Set(
+            ptFeatures.map((f: any) => f.properties?.id || f.id).filter(Boolean)
+          );
+        } catch {
+          // Ignore point parse error
+        }
+      }
       
       const payload = await res.json();
       const features = payload.features || [];
+      rawNwsFeaturesRef.current = features;
 
       processNWSFeatures(features);
       setSyncStatus(`LIVE: ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`);
@@ -1092,6 +1000,9 @@ function App() {
     const processedList: NWSAlert[] = [];
     const currentSignatures = new Set<string>();
     let freshUpdateCount = 0;
+    const effectiveAssets: LocationAsset[] = assets.length > 0
+      ? assets
+      : [{ id: 'current-loc', name: 'Current Position', lat: currentLat, lon: currentLon }];
 
     features.forEach((feature: any) => {
       const props = feature.properties || {};
@@ -1100,52 +1011,66 @@ function App() {
       const fullText = `${desc} ${instr}`;
       const eventName = props.event || 'Special Weather Statement';
 
-      // 1. Keyword analysis matches
+      // 1. Keyword analysis matches (only evaluate tornado trigger words on active warnings/statements, not regional Watches)
+      const upperEventName = eventName.toUpperCase();
+      const isWatchAlert = upperEventName.includes('WATCH');
+      const isTornadoWarningAlert = upperEventName.includes('TORNADO WARNING');
+
       const hasRotation =
-        fullText.includes('ROTATION') ||
-        fullText.includes('RADAR INDICATED TORNADO') ||
-        fullText.includes('TORNADIC') ||
-        fullText.includes('MESOCYCLONE') ||
-        fullText.includes('ROTATING WALL') ||
-        fullText.includes('ROTATING') ||
-        fullText.includes('VELOCITY COUPLING') ||
-        fullText.includes('COUPLING');
+        !isWatchAlert &&
+        (fullText.includes('ROTATION') ||
+          fullText.includes('RADAR INDICATED TORNADO') ||
+          fullText.includes('TORNADIC') ||
+          fullText.includes('MESOCYCLONE') ||
+          fullText.includes('ROTATING WALL') ||
+          fullText.includes('ROTATING') ||
+          fullText.includes('VELOCITY COUPLING') ||
+          fullText.includes('COUPLING'));
       const hasFunnel =
-        fullText.includes('FUNNEL') ||
-        fullText.includes('WALL CLOUD') ||
-        fullText.includes('SHELF CLOUD');
+        !isWatchAlert &&
+        (fullText.includes('FUNNEL') ||
+          fullText.includes('FUNNEL CLOUD') ||
+          fullText.includes('WALL CLOUD'));
       const hasObserved =
-        fullText.includes('OBSERVED') ||
-        fullText.includes('CONFIRMED') ||
-        fullText.includes('TORNADO ON THE GROUND') ||
-        fullText.includes('DEBRIS SIGNATURE') ||
-        fullText.includes('TORNADO DEBRIS') ||
-        fullText.includes('TDS') ||
-        fullText.includes('DAMAGING TORNADO');
+        !isWatchAlert &&
+        (fullText.includes('TORNADO ON THE GROUND') ||
+          fullText.includes('OBSERVED TORNADO') ||
+          fullText.includes('CONFIRMED TORNADO') ||
+          fullText.includes('DEBRIS SIGNATURE') ||
+          fullText.includes('TORNADO DEBRIS') ||
+          fullText.includes('TDS') ||
+          fullText.includes('DAMAGING TORNADO') ||
+          (isTornadoWarningAlert &&
+            (fullText.includes('TORNADO...OBSERVED') ||
+              fullText.includes('WEATHER SPOTTERS CONFIRMED') ||
+              fullText.includes('LAW ENFORCEMENT CONFIRMED') ||
+              fullText.includes('EMERGENCY MANAGEMENT CONFIRMED'))));
       const hasPossible =
-        fullText.includes('TORNADO...POSSIBLE') ||
-        fullText.includes('INDICATED TORNADO') ||
-        fullText.includes('DEVELOPING ROTATION') ||
-        fullText.includes('TORNADOES POSSIBLE') ||
-        fullText.includes('TORNADO THREAT...POSSIBLE') ||
-        fullText.includes('ROTATION ENVELOPE');
+        !isWatchAlert &&
+        (fullText.includes('TORNADO...POSSIBLE') ||
+          fullText.includes('INDICATED TORNADO') ||
+          fullText.includes('DEVELOPING ROTATION') ||
+          fullText.includes('TORNADOES POSSIBLE') ||
+          fullText.includes('TORNADO THREAT...POSSIBLE') ||
+          fullText.includes('ROTATION ENVELOPE'));
       const hasEmergency =
-        fullText.includes('TORNADO EMERGENCY') ||
-        fullText.includes('PARTICULARLY DANGEROUS SITUATION') ||
-        fullText.includes('PDS') ||
-        fullText.includes('CATASTROPHIC') ||
-        fullText.includes('MASSIVE TORNADO') ||
-        fullText.includes('EVACUATE') ||
-        eventName.toUpperCase().includes('EMERGENCY');
+        !isWatchAlert &&
+        (fullText.includes('TORNADO EMERGENCY') ||
+          fullText.includes('PARTICULARLY DANGEROUS SITUATION') ||
+          fullText.includes('PDS') ||
+          fullText.includes('CATASTROPHIC DAMAGE THREAT') ||
+          fullText.includes('MASSIVE TORNADO') ||
+          upperEventName.includes('TORNADO EMERGENCY'));
       const isDestructive =
-        fullText.includes('DESTRUCTIVE') ||
-        fullText.includes('80 MPH') ||
-        fullText.includes('90 MPH') ||
-        fullText.includes('100 MPH') ||
-        fullText.includes('WIND GUSTS TO 80') ||
-        fullText.includes('WIND GUSTS TO 90') ||
-        fullText.includes('WIND GUSTS TO 100') ||
-        fullText.includes('EXTREME WIND');
+        !isWatchAlert &&
+        (fullText.includes('DESTRUCTIVE') ||
+          fullText.includes('80 MPH') ||
+          fullText.includes('90 MPH') ||
+          fullText.includes('100 MPH') ||
+          fullText.includes('WIND GUSTS TO 80') ||
+          fullText.includes('WIND GUSTS TO 90') ||
+          fullText.includes('WIND GUSTS TO 100') ||
+          fullText.includes('EXTREME WIND'));
 
       // Storm Vector Trajectory Parsing utilizing silent convective-focused filters
       const trajectory = parseStormTrajectory(eventName, fullText);
@@ -1257,8 +1182,8 @@ function App() {
             const translatedPolygon = turf.transformTranslate(feature.geometry, travelDistanceKm, activeVector.bearing);
             
             // Check intersection of translated polygon with saved human coordinates or asset spaces
-            if (assets.length > 0) {
-              const hasAssetOverlap = assets.some((a) => {
+            if (effectiveAssets.length > 0) {
+              const hasAssetOverlap = effectiveAssets.some((a) => {
                 const pt = turf.point([a.lon, a.lat]);
                 return turf.booleanPointInPolygon(pt, translatedPolygon as any);
               });
@@ -1336,7 +1261,7 @@ function App() {
       let isHeadingTowards = false;
       let calculatedEta: number | undefined = undefined;
 
-      if (assets.length > 0) {
+      if (effectiveAssets.length > 0) {
         // Geometric distance to polygon boundary (Change 1 Priority)
         if (feature.geometry && feature.geometry.coordinates) {
           let calculatedMin = 9999;
@@ -1344,7 +1269,7 @@ function App() {
           let insidePoly = false;
 
           const alertId = props.id || feature.id || '';
-          assets.forEach((a) => {
+          effectiveAssets.forEach((a) => {
             const result = getMemoizedMinPolygonDistance(a.id, a.lat, a.lon, alertId, feature.geometry.coordinates);
             if (result.isInside) insidePoly = true;
             if (result.minDist < calculatedMin) {
@@ -1370,7 +1295,7 @@ function App() {
               }
 
               if (stormDir !== undefined) {
-                isHeadingTowards = assets.some((a) => {
+                isHeadingTowards = effectiveAssets.some((a) => {
                   const bearingToAsset = getBearing(closestPt![1], closestPt![0], a.lat, a.lon);
                   const diff = Math.abs(stormDir! - bearingToAsset);
                   return Math.min(diff, 360 - diff) < 45; // within 45 degrees tracking envelope
@@ -1391,15 +1316,24 @@ function App() {
           }
         }
 
-        // Zone Name Lookup Fallback (Trigger logic)
-        assets.forEach((asset) => {
-          const upperCounty = asset.name.toUpperCase().replace(/ COUNTY| PARISH/g, '').split(',')[0].trim();
+        // Zone Name & Exact Point Lookup Fallback (Trigger logic for County-based Watches & Warnings)
+        const alertFeatureId = props.id || feature.id || '';
+        if (alertFeatureId && pointDirectHitIdsRef.current.has(alertFeatureId)) {
+          matchedInZone = true;
+          shortestDistance = 0;
+        }
+        effectiveAssets.forEach((asset) => {
+          const cleanedName = asset.name.toUpperCase().replace(/ COUNTY| PARISH/g, '');
+          const nameTokens = cleanedName
+            .split(/[,()]/)
+            .map((t) => t.trim())
+            .filter((t) => t.length > 3 && t !== 'CURRENT POSITION');
           if (
-            upperCounty.length > 3 &&
             props.areaDesc &&
-            props.areaDesc.toUpperCase().includes(upperCounty)
+            nameTokens.some((token) => props.areaDesc.toUpperCase().includes(token))
           ) {
             matchedInZone = true;
+            if (shortestDistance === 999) shortestDistance = 0;
           }
         });
       }
@@ -1526,12 +1460,15 @@ function App() {
       return filteredUnique;
     });
     
-    // Generate and store rotation pins based on current active alerts
-    const activeRotationPins = translateAlertsToRotationPins(filteredUnique);
-    setRotationPins(activeRotationPins);
-
     previousSignaturesRef.current = currentSignatures;
   };
+
+  // Re-evaluate active NWS features whenever monitored assets, monitorRadius, or current position changes
+  useEffect(() => {
+    if (rawNwsFeaturesRef.current.length > 0) {
+      processNWSFeatures(rawNwsFeaturesRef.current);
+    }
+  }, [assets, settings.monitorRadius, currentLat, currentLon]);
 
   // Core SPC Mesoscale Discussions Acquisition Engine
   const fetchMesoscaleDiscussions = async () => {
@@ -1594,7 +1531,7 @@ function App() {
     setWindyPointLoading(true);
     const isUS = lat > 24 && lat < 50 && lon > -125 && lon < -66;
     let model = isUS ? 'namConus' : 'gfs';
-    const url = `https://api.windy.com/api/point-forecast/v2?key=${windyPointKey}`;
+    const url = 'https://api.windy.com/api/point-forecast/v2';
     const body = {
       lat: lat,
       lon: lon,
@@ -1604,9 +1541,7 @@ function App() {
       key: windyPointKey
     };
     const reqHeaders = {
-      'Content-Type': 'application/json',
-      'x-api-key': windyPointKey,
-      'key': windyPointKey
+      'Content-Type': 'application/json'
     };
 
     try {
@@ -1650,7 +1585,7 @@ function App() {
 
         model = 'gfs';
         body.model = 'gfs';
-        res = await fetch(`https://api.windy.com/api/point-forecast/v2?key=${windyPointKey}`, {
+        res = await fetch(url, {
           method: 'POST',
           headers: reqHeaders,
           body: JSON.stringify(body)
@@ -1776,7 +1711,11 @@ function App() {
 
         const tempVal = data['temp-surface']?.[closestIndex];
         const dewVal = data['dewpoint-surface']?.[closestIndex];
-        const windVal = data['wind-surface']?.[closestIndex];
+        const windU = data['wind_u-surface']?.[closestIndex];
+        const windV = data['wind_v-surface']?.[closestIndex];
+        const windVal = data['wind-surface']?.[closestIndex] !== undefined
+          ? data['wind-surface'][closestIndex]
+          : (windU !== undefined && windV !== undefined ? Math.hypot(windU, windV) : undefined);
         const gustVal = data['windGust-surface']?.[closestIndex] || data['gust-surface']?.[closestIndex];
         const pressureVal = data['pressure-surface']?.[closestIndex];
         const capeVal = data['cape-surface']?.[closestIndex];
@@ -2195,8 +2134,6 @@ function App() {
         setSearchQuery('');
         setCurrentLat(latVal);
         setCurrentLon(lonVal);
-        setCurrentLat(latVal);
-        setCurrentLon(lonVal);
 
       } else {
         triggerToast('Location pattern unmatched. Please try closer zip codes or US cities.', 'error');
@@ -2400,158 +2337,25 @@ function App() {
     }
   };
 
-  const isAnyDirectHitWarningActive = alerts.some(
-    (a) => a.isDirectHit && (a.event.toUpperCase().includes('TORNADO') || a.keywords.rotation || a.keywords.funnel || a.keywords.observed)
-  );
+  // Only flash the screen and display the critical warning banner when an active NWS alert (not a Watch)
+  // in the user's proximity/zone mentions one of the tornado trigger words.
+  const isAnyDirectHitWarningActive = alerts.some((a) => {
+    const upperEvent = a.event.toUpperCase();
+    const isWatch = upperEvent.includes('WATCH');
+    const hasTornadoTrigger =
+      !isWatch &&
+      (upperEvent.includes('TORNADO WARNING') ||
+        a.keywords.rotation ||
+        a.keywords.funnel ||
+        a.keywords.observed ||
+        a.keywords.possible ||
+        a.keywords.emergency);
+    return (a.isDirectHit || a.minDist <= settings.monitorRadius) && hasTornadoTrigger;
+  });
 
   const activeIntersectingMD = discussions.find(
     (d) => d.isIntersecting && d.probability >= 40
   );
-
-  // Derive Atmospheric stability & Storm Bypass Probability trends based on 6-Hour historical and forecast data
-  const forecastTrend = (() => {
-    const hasPressure = pressureHistory && pressureHistory.length >= 2;
-    const hasCape = capeHistory && capeHistory.length >= 2;
-
-    if (!hasPressure && !hasCape) {
-      return {
-        status: 'Trend: Stable',
-        statusDesc: 'Synchronizing regional surface pressure sensors and convective profiles. Active coordinate targets currently reflect thermodynamically stable layers.',
-        bypassChance: 'N/A',
-        badgeColor: 'border-slate-300 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 text-slate-500',
-        textColor: 'text-slate-500',
-        shadowColor: '',
-        trendLabel: 'Awaiting polling records to calculate local storm bypass risk indices.',
-        pressureDeltaText: 'Measuring...',
-        capeDeltaText: 'Measuring...',
-        pressureDirection: 'Stable',
-        capeDirection: 'Stable',
-        deltaPressure: 0,
-        maxCapeVal: 0,
-        currentCapeVal: 0,
-        isUnstable: false,
-        isStable: true
-      };
-    }
-
-    // 1. Calculate pressure trend over available polling ticks
-    let deltaPressure = 0;
-    let pressureDirection = 'Steady';
-    if (hasPressure) {
-      const earliestP = pressureHistory[0].pressure;
-      const latestP = pressureHistory[pressureHistory.length - 1].pressure;
-      deltaPressure = latestP - earliestP;
-      if (deltaPressure < -0.04) {
-        pressureDirection = 'Falling Rapidly';
-      } else if (deltaPressure < -0.01) {
-        pressureDirection = 'Falling';
-      } else if (deltaPressure > 0.04) {
-        pressureDirection = 'Rising Rapidly';
-      } else if (deltaPressure > 0.01) {
-        pressureDirection = 'Rising';
-      }
-    }
-
-    // 2. Calculate CAPE trend over historical and predictive points
-    const currentCapeVal = windyPointTelemetry?.cape !== undefined 
-      ? windyPointTelemetry.cape 
-      : (capeHistory.length > 0 ? capeHistory[capeHistory.length - 1].cape : 0);
-    const maxCapeVal = capeHistory.length > 0 ? Math.max(...capeHistory.map(p => p.cape)) : currentCapeVal;
-    
-    let capeDirection = 'Stable';
-    if (hasCape) {
-      const earliestC = capeHistory[0].cape;
-      const latestC = currentCapeVal;
-      const deltaCape = latestC - earliestC;
-      if (deltaCape > 300) {
-        capeDirection = 'Increasing Instability';
-      } else if (deltaCape < -300) {
-        capeDirection = 'Stabilizing';
-      }
-    }
-
-    // 3. Synthesize stability trends into direct storm bypass metrics
-    let status = 'Trend: Stable';
-    let statusDesc = 'Approaching storms are highly likely to weaken, dissipate, or split and go around your selected locations due to low atmospheric fuel.';
-    let bypassChance = 'High (80% - 90% Bypass)';
-    let badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400';
-    let textColor = 'text-emerald-700 dark:text-emerald-400';
-    let shadowColor = 'shadow-[0_4px_20px_rgba(16,185,129,0.05)]';
-    let trendLabel = 'Stable Atmosphere / Storm Dissipation Mode';
-    let isUnstable = false;
-    let isStable = true;
-    
-    const pressureDeltaText = `${deltaPressure >= 0 ? '+' : ''}${deltaPressure.toFixed(2)} InHg`;
-    const capeDeltaText = `${maxCapeVal} J/kg Peak`;
-
-    // Case 1: Extreme Instability / Active Destabilizing Environment
-    if (deltaPressure < -0.015 && (maxCapeVal > 1500 || capeDirection === 'Increasing Instability')) {
-      status = 'Trend: Rapidly Destabilizing';
-      statusDesc = 'Atmospheric pressure is dropping rapidly while convective energy rises. Storm cells entering this workspace are highly likely to maintain severity or intensify to direct hits.';
-      bypassChance = 'Minimal (5% - 15% Bypass)';
-      badgeColor = 'bg-rose-500/10 border-rose-500 text-rose-600 dark:text-rose-400';
-      textColor = 'text-rose-600 dark:text-rose-400';
-      shadowColor = 'shadow-[0_4px_20px_rgba(239,68,68,0.08)]';
-      trendLabel = 'Severe Instability / High Storm Maintenance Air Mass';
-      isUnstable = true;
-      isStable = false;
-    }
-    // Case 2: Thermodynamically Stable (Low CAPE)
-    else if (maxCapeVal < 300 && deltaPressure >= -0.01) {
-      status = 'Trend: Stable';
-      statusDesc = 'Local microclimate lacks convective buoyancy and thermal moisture (CAPE < 300). Approaching convective cells usually lose internal convection and divert path or go around you.';
-      bypassChance = 'Very High (90% - 95% Bypass)';
-      badgeColor = 'bg-teal-500/10 border-teal-500 text-teal-600 dark:text-neon-aqua';
-      textColor = 'text-teal-600 dark:text-neon-aqua';
-      shadowColor = 'shadow-[0_4px_20px_rgba(20,184,166,0.05)]';
-      trendLabel = 'Atmospheric Shield / Severe Weather Unfavorable';
-      isUnstable = false;
-      isStable = true;
-    }
-    // Case 3: Storm Decaying / Cool Stabilization
-    else if (deltaPressure > 0.01 || (capeDirection === 'Stabilizing' && maxCapeVal < 1000)) {
-      status = 'Trend: Stabilizing';
-      statusDesc = 'Pressure is rising or CAPE indices are actively cooling down, indicating the storm engine is choked of convective potential. Incoming cells are expected to weaken or decay.';
-      bypassChance = 'High (70% - 85% Bypass)';
-      badgeColor = 'bg-emerald-500/10 border-emerald-500 text-emerald-700 dark:text-emerald-400';
-      textColor = 'text-emerald-700 dark:text-emerald-400';
-      shadowColor = 'shadow-[0_4px_20px_rgba(16,185,129,0.05)]';
-      trendLabel = 'Positive Pressure Drift / Convective Decay';
-      isUnstable = false;
-      isStable = true;
-    }
-    // Case 4: Moderately Unstable / Dynamic Course Changes
-    else {
-      status = 'Trend: Moderately Unstable';
-      statusDesc = 'Atmospheric parameters support moderate convective support (CAPE ~800-1500). Alert paths may wobble, shift, or decay, making trajectory tracking crucial.';
-      bypassChance = 'Moderate (45% - 60% Bypass)';
-      badgeColor = 'bg-amber-500/10 border-amber-500 text-amber-600 dark:text-amber-400';
-      textColor = 'text-amber-600 dark:text-amber-400';
-      shadowColor = 'shadow-[0_4px_20px_rgba(245,158,11,0.05)]';
-      trendLabel = 'Dynamic Convective Corridor / Ongoing Maintenance';
-      isUnstable = true;
-      isStable = false;
-    }
-
-    return {
-      status,
-      statusDesc,
-      bypassChance,
-      badgeColor,
-      textColor,
-      shadowColor,
-      trendLabel,
-      pressureDeltaText,
-      capeDeltaText,
-      pressureDirection,
-      capeDirection,
-      deltaPressure,
-      maxCapeVal,
-      currentCapeVal,
-      isUnstable,
-      isStable
-    };
-  })();
 
   return (
     <main className={`min-h-screen flex flex-col text-slate-900 dark:text-slate-100 ${settings.flash && isAnyDirectHitWarningActive ? 'flash-active-severe' : 'bg-slate-50 dark:bg-slate-950'} transition-colors duration-300`}>
@@ -3146,7 +2950,7 @@ function App() {
                           className={`py-2 px-3 border rounded-xl flex items-center justify-between gap-3 font-sans transition-all cursor-pointer ${
                             Math.abs(currentLat - asset.lat) < 0.001 && Math.abs(currentLon - asset.lon) < 0.001
                               ? 'bg-cyan-500/10 border-cyan-500 dark:border-neon-aqua/70 shadow-[0_0_10px_rgba(6,182,212,0.15)]'
-                              : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-705'
+                              : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                           }`}
                         >
                           <div className="truncate flex-grow">
@@ -3190,7 +2994,105 @@ function App() {
               
               {telemetry ? (
                 <>
+                  {/* Station Header & Text Description */}
+                  <div className="mb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 px-4 py-2.5 rounded-xl">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="w-3.5 h-3.5 text-cyan-600 dark:text-neon-aqua shrink-0" />
+                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 dark:text-white">
+                        {telemetry.stationName || telemetry.stationId || 'Local ASOS Station'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono font-bold text-slate-600 dark:text-slate-400">
+                      {telemetry.textDescription && (
+                        <span className="px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-neon-aqua uppercase font-black">
+                          {telemetry.textDescription}
+                        </span>
+                      )}
+                      {telemetry.windDirection && (
+                        <span>WIND DIR: {telemetry.windDirection}</span>
+                      )}
+                    </div>
+                  </div>
 
+                  {/* Primary Surface Observations Readout Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                      <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block font-mono">
+                        Temperature
+                      </span>
+                      <span className="text-lg font-black text-slate-800 dark:text-white font-mono">
+                        {telemetry.temperature ? `${telemetry.temperature}°F` : (windyPointTelemetry?.temp ? `${windyPointTelemetry.temp}°F` : 'N/A')}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                      <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block font-mono">
+                        Dew Point
+                      </span>
+                      <span className="text-lg font-black text-teal-600 dark:text-neon-aqua font-mono">
+                        {telemetry.dewPoint ? `${telemetry.dewPoint}°F` : (windyPointTelemetry?.dewpoint ? `${windyPointTelemetry.dewpoint}°F` : 'N/A')}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                      <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block font-mono">
+                        Barometric Pres
+                      </span>
+                      <span className="text-lg font-black text-cyan-600 dark:text-cyan-400 font-mono">
+                        {telemetry.pressure ? `${telemetry.pressure} inHg` : (windyPointTelemetry?.pressure ? `${windyPointTelemetry.pressure} inHg` : 'N/A')}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                      <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block font-mono">
+                        Forecast High
+                      </span>
+                      <span className="text-lg font-black text-amber-500 font-mono">
+                        {telemetry.highTemp || 'N/A'}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                      <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block font-mono">
+                        Forecast Low
+                      </span>
+                      <span className="text-lg font-black text-indigo-500 dark:text-indigo-400 font-mono">
+                        {telemetry.lowTemp || 'N/A'}
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                      <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 block font-mono">
+                        Precip Prob
+                      </span>
+                      <span className="text-lg font-black text-rose-500 dark:text-neon-pink font-mono">
+                        {telemetry.probPrecip || '0%'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Wind Gauge & CAPE History Chart */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-3">
+                    <WindGauge
+                      windSpeed={telemetry?.windSpeed ?? windyPointTelemetry?.wind}
+                      windGust={telemetry?.windGust ?? windyPointTelemetry?.gust}
+                      {...({ windDirection: telemetry?.windDirection } as any)}
+                    />
+                    <Suspense
+                      fallback={
+                        <div className="mt-4 h-48 border border-slate-200 dark:border-slate-800/80 p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-950/40 flex items-center justify-center text-[10px] font-mono uppercase text-slate-500">
+                          Loading CAPE History...
+                        </div>
+                      }
+                    >
+                      <CapeHistoryChart
+                        history={capeHistory}
+                        currentCape={windyPointTelemetry?.cape ?? 0}
+                        loading={windyPointLoading}
+                        {...({ data: capeHistory } as any)}
+                      />
+                    </Suspense>
+                  </div>
 
                   {pressureHistory && pressureHistory.length > 0 && (
                     <div className="mt-3 border border-slate-200 dark:border-slate-800/80 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-950/40 transition-colors">
@@ -3260,184 +3162,6 @@ function App() {
                 </div>
               )}
             </div>
-
-            <hr className="border-slate-200 dark:border-slate-800/80 my-5" />
-
-          <section className="bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm transition-all text-slate-800 dark:text-white" aria-label="Tornadogenesis Analysis">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h2 className="text-lg sm:text-xl font-black font-sans tracking-tight uppercase text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-indigo-600 dark:from-orange-400 dark:to-indigo-400 flex items-center gap-2">
-                  <Flame className="w-5 h-5 text-orange-500 animate-pulse" />
-                  Convective Tornadogenesis Model (EXPERIMENTAL)
-                </h2>
-                <p className="text-[9px] sm:text-[10px] font-mono uppercase tracking-widest text-slate-600 dark:text-slate-600 mt-1 font-extrabold pb-1 border-b border-slate-100 dark:border-slate-800">
-                  Thermodynamic AI Solver & Atmospheric Telemetry Core
-                </p>
-              </div>
-            </div>
-
-            {isAnalyzingTelemetry ? (
-              <div className="py-12 flex flex-col items-center justify-center gap-3">
-                <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-[10px] sm:text-xs font-mono uppercase tracking-wider text-slate-600 dark:text-slate-600 font-bold animate-pulse">
-                  Querying dynamic atmospheric solver columns...
-                </p>
-              </div>
-            ) : !rotationPins || rotationPins.length === 0 ? (
-              <div className="p-5 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 text-slate-500 dark:text-slate-450 font-mono text-[9px] uppercase tracking-wider text-center rounded-2xl flex flex-col items-center justify-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[8px] font-black text-slate-550 dark:text-slate-500">
-                  SYSTEM IDLE / STANDBY
-                </span>
-                <span className="text-[8px] text-slate-550 dark:text-slate-550 font-sans tracking-normal normal-case">
-                  Model standby. Waiting for convective storm track, vortex, or mesocyclone signature to be identified on the radar.
-                </span>
-              </div>
-            ) : tornadogenesisData ? (
-              <div className="space-y-6 animate-fade-in">
-                {/* Visual Gauge Summary Card */}
-                <div className="bg-slate-50 dark:bg-slate-950/50 p-5 rounded-2xl border border-slate-200 dark:border-slate-850 flex flex-col items-center justify-center text-center gap-6">
-                  {/* Circular Ring Gauge */}
-                  <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90">
-                      <circle
-                        cx="56"
-                        cy="56"
-                        r="48"
-                        className="stroke-slate-200 dark:stroke-slate-800"
-                        strokeWidth="8"
-                        fill="transparent"
-                      />
-                      <circle
-                        cx="56"
-                        cy="56"
-                        r="48"
-                        className="stroke-indigo-500 dark:stroke-indigo-400 transition-all duration-1000"
-                        strokeWidth="8"
-                        fill="transparent"
-                        strokeDasharray={301.6}
-                        strokeDashoffset={301.6 - (301.6 * (tornadogenesisData.genesis_probability_pct || 0)) / 100}
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <div className="absolute text-center">
-                      <span className="text-2xl font-black font-mono leading-none">
-                        {tornadogenesisData.genesis_probability_pct}%
-                      </span>
-                      <span className="text-[7.5px] font-black uppercase text-slate-600 block tracking-widest mt-0.5">
-                        TORNADO PROB
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Summary Text description */}
-                  <div className="text-center space-y-2 flex flex-col items-center">
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-600 dark:text-slate-600 leading-none">
-                      AI Diagnostic Assessment
-                    </h3>
-                    <p className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 leading-relaxed">
-                      {tornadogenesisData.display_message || 'Atmospheric telemetry columns analyzed successfully.'}
-                    </p>
-                    <div className="flex justify-center gap-2 flex-wrap">
-                      <span className={`px-2 py-0.5 rounded text-[8px] font-mono tracking-widest uppercase font-bold text-white ${
-                        tornadogenesisData.genesis_probability_pct > 60
-                          ? 'bg-rose-600'
-                          : tornadogenesisData.genesis_probability_pct > 30
-                          ? 'bg-orange-500'
-                          : 'bg-emerald-600'
-                      }`}>
-                        {tornadogenesisData.genesis_probability_pct > 60
-                          ? 'CRITICAL UNSTABLE COLUMN'
-                          : tornadogenesisData.genesis_probability_pct > 30
-                          ? 'WIND COUPLING ELEVATED'
-                          : 'MODERATE CONVECTIVE ENVIRONMENT'}
-                      </span>
-                      {tornadogenesisData.downburst_risk && tornadogenesisData.downburst_risk !== 'None' && (
-                        <div className={`mt-3 py-1.5 px-3 rounded text-[10px] font-black tracking-widest text-white uppercase text-center
-                          ${tornadogenesisData.downburst_risk === 'Extreme' ? 'bg-fuchsia-600' :
-                          tornadogenesisData.downburst_risk === 'High' ? 'bg-purple-600' :
-                          'bg-indigo-600'}`}>
-                          {tornadogenesisData.downburst_risk.toUpperCase()} DOWNBURST RISK
-                        </div>
-                      )}
-
-                      {tornadogenesisData.diagnostic_reflection && (
-                        <div className="mt-4 p-3 bg-red-950/40 border border-red-500/50 rounded-xl">
-                           <div className="flex items-center gap-2 mb-1.5">
-                             <AlertTriangle className="w-4 h-4 text-red-500 animate-pulse" />
-                             <span className="text-[10px] font-black uppercase text-red-500 tracking-widest">Diagnostic Reflection Triggered</span>
-                           </div>
-                           <p className="text-xs font-bold text-red-200/80 leading-relaxed">
-                             {tornadogenesisData.diagnostic_reflection}
-                           </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* The 4 Severe Weather Ingredients (Vertical Stack) */}
-                <div className="flex flex-col gap-4">
-                  {/* Low Level Moisture */}
-                  <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <Thermometer className="w-4 h-4 text-rose-500" />
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 font-mono">
-                        1. Low-level Moisture
-                      </span>
-                    </div>
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed uppercase">
-                      {tornadogenesisData.metrics?.moisture || 'Checking mixing ratios...'}
-                    </p>
-                  </div>
-
-                  {/* Instability */}
-                  <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <Gauge className="w-4 h-4 text-amber-500" />
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 font-mono">
-                        2. Atmospheric Instability
-                      </span>
-                    </div>
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed uppercase">
-                      {tornadogenesisData.metrics?.instability || 'Analyzing MUCAPE column...'}
-                    </p>
-                  </div>
-
-                  {/* Lifting Mechanisms */}
-                  <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <Zap className="w-4 h-4 text-cyan-500 animate-pulse" />
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 font-mono">
-                        3. Lifting Mechanisms
-                      </span>
-                    </div>
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed uppercase">
-                      {tornadogenesisData.metrics?.lift || 'Assessing front/boundary convergence...'}
-                    </p>
-                  </div>
-
-                  {/* Vertical Wind Shear */}
-                  <div className="bg-slate-50 dark:bg-slate-950/30 p-4 border border-slate-200 dark:border-slate-800/80 rounded-2xl text-left space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <Wind className="w-4 h-4 text-indigo-500" />
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 font-mono">
-                        4. Vertical Wind Shear
-                      </span>
-                    </div>
-                    <p className="text-xs font-bold text-slate-700 dark:text-slate-200 leading-relaxed uppercase">
-                      {tornadogenesisData.metrics?.shear || 'Modeling effective SRH grids...'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-600 font-mono text-[9px] uppercase text-center rounded-xl">
-                Synchronizing closest station observational grids...
-              </div>
-            )}
-          </section>
-
-          {/* Storm Event Capture Console — hidden from regular users, logic runs in background via auto-capture */}
 
             <hr className="border-slate-200 dark:border-slate-800/80 my-5" />
 
@@ -3626,31 +3350,8 @@ function App() {
                     <ThreatCard
                       key={alert.id}
                       alert={alert}
-                      hasAssets={assets.length > 0}
+                      hasAssets={true}
                       onViewTrajectory={handleFocusTrajectory}
-                      onStormChase={(targetAlert) => {
-                        if (targetAlert.geometry && targetAlert.geometry.coordinates) {
-                          const centroid = getGeometryCentroid(targetAlert.geometry.coordinates);
-                          if (centroid) {
-                            setCurrentLat(centroid.lat);
-                            setCurrentLon(centroid.lon);
-                            triggerToast(`Moved Gateway to ${targetAlert.event} center!`, 'success');
-                          }
-                        }
-                      }}
-                      onAutoCapture={(targetAlert) => {
-                        if (targetAlert.geometry && targetAlert.geometry.coordinates) {
-                          const centroid = getGeometryCentroid(targetAlert.geometry.coordinates);
-                          if (centroid) {
-                            setCurrentLat(centroid.lat);
-                            setCurrentLon(centroid.lon);
-                          }
-                        }
-                        if (!isRecording) {
-                          setIsRecording(true);
-                        }
-                        triggerToast(`EMERGENCY AUTO-CAPTURE: Dispatched & recording ${targetAlert.event}!`, 'error');
-                      }}
                     />
                   ))}
                 </div>
@@ -3680,7 +3381,7 @@ function App() {
             
             <button
               onClick={() => setShowMDInputForm(!showMDInputForm)}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-905 border border-slate-300 dark:border-slate-800 hover:border-amber-500 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer font-sans"
+              className="px-4 py-2 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 hover:border-amber-500 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer font-sans"
             >
               {showMDInputForm ? 'Close Input Panel' : 'Feed Custom SPC Text'}
             </button>
@@ -3828,76 +3529,6 @@ function App() {
           )}
         </section>
       </div>
-
-      {/* Storm Chaser Probe Panel */}
-      {chaseTarget && (
-        <div className="fixed top-0 right-0 h-full w-80 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-l border-slate-200 dark:border-slate-800 shadow-2xl z-[9999] p-6 flex flex-col transform transition-transform duration-300">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-white flex items-center gap-2">
-              <Compass className="w-4 h-4 text-cyan-500 animate-spin-slow" />
-              STORM CHASER
-            </h2>
-            <button onClick={() => setChaseTarget(null)} className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md">
-              <span className="text-slate-500 font-bold text-lg leading-none">&times;</span>
-            </button>
-          </div>
-          
-          <div className="text-[10px] font-mono text-slate-500 mb-6 border-b border-slate-200 dark:border-slate-800 pb-4">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-              TARGET: {chaseTarget.lat.toFixed(4)}, {chaseTarget.lon.toFixed(4)}
-            </div>
-          </div>
-
-          {chaseTarget.loading ? (
-            <div className="flex-grow flex flex-col items-center justify-center space-y-4">
-              <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-xs font-bold text-cyan-600 uppercase tracking-widest animate-pulse">PROBING ATMOSPHERE...</p>
-            </div>
-          ) : chaseTarget.error ? (
-            <div className="flex-grow flex flex-col items-center justify-center space-y-4 text-center">
-              <AlertOctagon className="w-12 h-12 text-rose-500" />
-              <p className="text-xs font-bold text-rose-500 uppercase tracking-widest">TELEMETRY FETCH FAILED</p>
-            </div>
-          ) : chaseTarget.data ? (
-            <div className="flex-grow space-y-6">
-              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Tornadogenesis</p>
-                <div className="flex items-end gap-2">
-                  <p className={`text-4xl font-black ${chaseTarget.data.tornadoProb > 30 ? 'text-rose-500' : 'text-cyan-600'}`}>
-                    {chaseTarget.data.tornadoProb}%
-                  </p>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Surface Instability</p>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-black text-slate-700 dark:text-white">{chaseTarget.data.cape} <span className="text-xs text-slate-500">J/kg</span></span>
-                  <Flame className={`w-5 h-5 ${chaseTarget.data.cape > 2000 ? 'text-amber-500' : 'text-slate-400'}`} />
-                </div>
-              </div>
-
-              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Low-Level Shear</p>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-black text-slate-700 dark:text-white">{chaseTarget.data.shear} <span className="text-xs text-slate-500">MPH</span></span>
-                  <Wind className={`w-5 h-5 ${chaseTarget.data.shear > 40 ? 'text-indigo-500' : 'text-slate-400'}`} />
-                </div>
-              </div>
-
-              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Dewpoint</p>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-black text-slate-700 dark:text-white">{chaseTarget.data.dewpoint} <span className="text-xs text-slate-500">°F</span></span>
-                  <Thermometer className="w-5 h-5 text-teal-500" />
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      )}
-
     </main>
   );
 }
