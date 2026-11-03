@@ -35,10 +35,7 @@ export interface NWSAlert {
   radarLocationHeadline?: string; // NWS "At 715 PM CDT, a tornado/thunderstorm was located..."
   impactedLocations?: string; // NWS "Locations impacted include..." and highway mile markers
   maxWindHailTag?: string; // NWS bottom tags e.g. "MAX WIND: 70 MPH • MAX HAIL: 1.75 IN"
-  stormCoreAddress?: string; // Free OSM Nominatim reverse-geocoded road/locality at storm core
-  stormCoreLat?: number; // Exact NWS TIME...MOT...LOC Doppler radar fix latitude (or polygon centroid fallback)
-  stormCoreLon?: number; // Exact NWS TIME...MOT...LOC Doppler radar fix longitude (or polygon centroid fallback)
-  isRadarPinpoint?: boolean; // True when stormCoreLat/Lon came from exact NWS TIME...MOT...LOC Doppler radar fix
+  stormCoreAddress?: string; // Free OSM Nominatim reverse-geocoded road/locality at storm centroid
   isDirectHit: boolean;
   headedTowards: boolean;
   etaMinutes?: number;
