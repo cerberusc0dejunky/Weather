@@ -23,7 +23,6 @@ import {
   getParsedPolygonMinDistance,
   parseStormTrajectory,
 } from './utils/geoUtils';
-import { syncToGoogleSheets } from './utils/googleSheetsSync';
 import ThreatCard from './components/ThreatCard';
 import WindGauge from './components/WindGauge';
 import type { ResolvedAlert } from './components/AlertHistory';
@@ -162,7 +161,7 @@ function parseMesoscaleDiscussion(id: string, issuanceTime: string, text: string
   const number = numberMatch ? numberMatch[1] : 'Unknown';
   
   const areasMatch = text.match(/Areas affected\.\.\.(.+)/i);
-  let areasAffected = 'portions of the Ozarks and ArkLaTex';
+  let areasAffected = 'Unspecified Region';
   if (areasMatch) {
     const endIdx = areasMatch[1].indexOf('\n');
     areasAffected = endIdx !== -1 ? areasMatch[1].substring(0, endIdx).trim() : areasMatch[1].trim();
@@ -492,54 +491,6 @@ function App() {
     setRotationPins(translateAlertsToRotationPins(alerts));
   }, [alerts]);
 
-  const syncedTornadoAlertIdsRef = useRef<Set<string>>(new Set());
-
-  const handleSyncToSheets = async (reason = 'Tornado Alert Telemetry') => {
-    try {
-      await syncToGoogleSheets({
-        latitude: currentLat,
-        longitude: currentLon,
-        lat: currentLat,
-        lon: currentLon,
-        alerts,
-        rotationPins,
-        telemetry,
-        geminiReport: `[${reason}] Temp: ${telemetry?.temperature || windyPointTelemetry?.temp || 'N/A'}F | Dew: ${telemetry?.dewPoint || windyPointTelemetry?.dewpoint || 'N/A'}F | Wind: ${telemetry?.windSpeed || windyPointTelemetry?.wind || 'N/A'} mph | Pres: ${telemetry?.pressure || windyPointTelemetry?.pressure || 'N/A'} InHg | CAPE: ${windyPointTelemetry?.cape ?? 0} J/kg`,
-      });
-    } catch (err: any) {
-      console.warn('[Sheets Sync Fail]', err);
-    }
-  };
-
-  const handleSyncMlRef = useRef(handleSyncToSheets);
-  useEffect(() => {
-    handleSyncMlRef.current = handleSyncToSheets;
-  }, [handleSyncToSheets]);
-
-  // Automatically capture and sync metrics to Google Sheets when an NWS alert with a tornado trigger word is intercepted in proximity
-  useEffect(() => {
-    const activeTornadoAlerts = alerts.filter((a) => {
-      const upperEvent = a.event.toUpperCase();
-      const isWatch = upperEvent.includes('WATCH');
-      const hasTornadoTrigger =
-        !isWatch &&
-        (upperEvent.includes('TORNADO WARNING') ||
-          a.keywords.emergency ||
-          a.keywords.observed ||
-          a.keywords.rotation ||
-          a.keywords.funnel ||
-          a.keywords.possible);
-      return (a.isDirectHit || a.minDist <= settings.monitorRadius) && hasTornadoTrigger;
-    });
-
-    activeTornadoAlerts.forEach((alert) => {
-      if (!syncedTornadoAlertIdsRef.current.has(alert.id)) {
-        syncedTornadoAlertIdsRef.current.add(alert.id);
-        handleSyncMlRef.current(`Active Tornado Trigger: ${alert.event}`);
-      }
-    });
-  }, [alerts, settings.monitorRadius]);
-
   // User notifications toast system (replacing iframe-blocked alert popups)
   const [notificationToast, setNotificationToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
 
@@ -679,23 +630,6 @@ function App() {
         if (expired.length > 0) {
           addAlertsToHistoryRef.current(expired);
           triggerToast(`${expired.length} threat${expired.length > 1 ? "s" : ""} expired and archived.`, "info");
-          
-          // Auto-trigger Google Sheets sync with the final telemetry metrics if any expired alert had tornado trigger words
-          if (
-            expired.some(
-              (a) =>
-                !a.event.toUpperCase().includes('WATCH') &&
-                (a.event.toUpperCase().includes('TORNADO WARNING') ||
-                  a.keywords.emergency ||
-                  a.keywords.observed ||
-                  a.keywords.rotation ||
-                  a.keywords.funnel ||
-                  a.keywords.possible)
-            )
-          ) {
-            handleSyncMlRef.current('Expired Tornado Alert Telemetry');
-          }
-
           return prevAlerts.filter((alert) => !alert.expires || new Date(alert.expires) > now);
         }
         return prevAlerts;
@@ -1775,15 +1709,6 @@ function App() {
                 timestamp: pointTimeMs,
                 cape: matchedCape,
                 isForecast: pointTimeMs > nowMs
-              });
-            } else {
-              const factor = Math.max(0.1, 1 - (h * 0.15) - (0.1 * Math.sin(h)));
-              const simCape = Math.round(currentCape * factor);
-              mergedPoints.push({
-                time: formattedTime,
-                timestamp: pointTimeMs,
-                cape: simCape,
-                isForecast: false
               });
             }
           }

@@ -78,37 +78,6 @@ function projectCoordinates(lat: number, lon: number, bearing: number, distanceM
   };
 }
 
-export interface HeatSpot {
-  lat: number;
-  lon: number;
-  intensity: number; // 0.1 to 1.0
-  label: string;
-  count: number; // Avg annual warning events
-}
-
-export const HISTORICAL_HOTSPOTS: HeatSpot[] = [
-  { lat: 35.22, lon: -97.44, intensity: 1.0, label: 'Norman / Moore, OK', count: 184 },
-  { lat: 35.46, lon: -97.51, intensity: 0.95, label: 'Oklahoma City, OK', count: 172 },
-  { lat: 36.15, lon: -95.99, intensity: 0.85, label: 'Tulsa, OK', count: 148 },
-  { lat: 37.68, lon: -97.33, intensity: 0.88, label: 'Wichita, KS', count: 151 },
-  { lat: 32.77, lon: -96.79, intensity: 0.90, label: 'Dallas / Fort Worth, TX', count: 165 },
-  { lat: 39.09, lon: -94.57, intensity: 0.78, label: 'Kansas City, MO', count: 122 },
-  { lat: 34.73, lon: -86.58, intensity: 0.88, label: 'Huntsville, AL', count: 155 },
-  { lat: 33.52, lon: -86.81, intensity: 0.84, label: 'Birmingham, AL', count: 140 },
-  { lat: 32.29, lon: -90.18, intensity: 0.82, label: 'Jackson, MS', count: 135 },
-  { lat: 34.74, lon: -92.28, intensity: 0.75, label: 'Little Rock, AR', count: 118 },
-  { lat: 35.14, lon: -90.04, intensity: 0.72, label: 'Memphis, TN', count: 110 },
-  { lat: 36.16, lon: -86.78, intensity: 0.70, label: 'Nashville, TN', count: 105 },
-  { lat: 28.53, lon: -81.37, intensity: 0.80, label: 'Orlando, FL', count: 130 },
-  { lat: 27.95, lon: -82.45, intensity: 0.78, label: 'Tampa, FL', count: 125 },
-  { lat: 38.62, lon: -90.19, intensity: 0.74, label: 'St. Louis, MO', count: 115 },
-  { lat: 30.69, lon: -88.03, intensity: 0.70, label: 'Mobile, AL', count: 108 },
-  { lat: 32.52, lon: -93.75, intensity: 0.73, label: 'Shreveport, LA', count: 112 },
-  { lat: 41.25, lon: -95.93, intensity: 0.68, label: 'Omaha, NE', count: 98 },
-  { lat: 39.73, lon: -104.99, intensity: 0.65, label: 'Denver, CO', count: 92 },
-  { lat: 40.81, lon: -96.70, intensity: 0.67, label: 'Lincoln, NE', count: 95 },
-];
-
 interface RadarMapProps {
   userLat: number;
   userLon: number;
@@ -130,8 +99,6 @@ declare global {
     windyStore?: any;
     L?: any;
     onMapSetCoordinates?: (lat: number, lon: number) => void;
-    onStormChaseProbe?: (lat: number, lon: number) => void;
-    onStormChaseSync?: (lat: number, lon: number) => void;
   }
 }
 
@@ -152,7 +119,6 @@ export default function RadarMap({
   const [initError, setInitError] = useState<boolean>(false);
   const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
   const [reflectivityType, setReflectivityType] = useState<'standard' | 'high-res'>('standard');
-  const [showHeatmap, setShowHeatmap] = useState<boolean>(true);
   
   const [retryCount, setRetryCount] = useState<number>(0);
   const [mapDimensions, setMapDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -692,7 +658,7 @@ export default function RadarMap({
   // Sync Positions and Alert Polygons
   useEffect(() => {
     updateInteractiveElements();
-  }, [userLat, userLon, assets, alerts, activeThreats, discussions, rotationPins, mapMode, reflectivityType, showHeatmap]);
+  }, [userLat, userLon, assets, alerts, activeThreats, discussions, rotationPins, mapMode, reflectivityType]);
 
   const cleanupInteractiveElements = () => {
     const L = window.L;
@@ -1271,148 +1237,9 @@ export default function RadarMap({
           polygonLayersRef.current.push(mcdLayer);
         });
       }
-
-      // 6. Draw Convective Threat Heatmap circles (climatological and live alert hot spots)
-      if (showHeatmap) {
-        HISTORICAL_HOTSPOTS.forEach((spot) => {
-          // Inner core circle
-          const coreCircle = L.circle([spot.lat, spot.lon], {
-            radius: 12000,
-            color: '#ef4444',
-            weight: 1.5,
-            opacity: spot.intensity * 0.4,
-            fillColor: '#ef4444',
-            fillOpacity: spot.intensity * 0.5,
-          })
-            .addTo(map)
-            .bindPopup(`
-              <div class="text-slate-950 font-sans p-2 max-w-[220px]">
-                <div class="flex items-center justify-between mb-1">
-                  <span class="px-1.5 py-0.5 rounded text-[8px] font-black text-rose-500 bg-rose-50 border border-rose-200 uppercase tracking-widest leading-none">
-                    SEVERE HOTSPOT
-                  </span>
-                  <span class="text-[8px] font-black uppercase text-slate-400 font-mono">Index: ${(spot.intensity * 100).toFixed(0)}%</span>
-                </div>
-                <div class="font-black text-xs uppercase text-slate-900">${spot.label}</div>
-                <p class="text-[9px] text-slate-500 mt-1 font-mono leading-tight">Average density: <b>${spot.count} severe warnings / year</b></p>
-                <p class="text-[9px] text-rose-700 mt-1.5 font-sans font-bold uppercase leading-none">High Warning Recurrence Zone</p>
-              </div>
-            `);
-          polygonLayersRef.current.push(coreCircle);
-
-          // Middle gradient ring
-          const midCircle = L.circle([spot.lat, spot.lon], {
-            radius: 28000,
-            color: '#f97316',
-            weight: 0,
-            fillColor: '#f97316',
-            fillOpacity: spot.intensity * 0.18,
-            interactive: false,
-          }).addTo(map);
-          polygonLayersRef.current.push(midCircle);
-
-          // Outer dispersion halo
-          const outerCircle = L.circle([spot.lat, spot.lon], {
-            radius: 54000,
-            color: '#ef4444',
-            weight: 0,
-            fillColor: '#ef4444',
-            fillOpacity: spot.intensity * 0.08,
-            interactive: false,
-          }).addTo(map);
-          polygonLayersRef.current.push(outerCircle);
-        });
-      }
     } catch (e) {
       console.warn('Error rendering elements to Leaflet layer:', e);
     }
-  };
-
-  // SVG Fallback Interface: rendered if Windy API script fails to register or loads in highly restricted context
-  const renderSvgFallback = () => {
-    return (
-      <div className="w-full h-full bg-slate-950 border-2 border-neon-aqua/30 rounded-2xl p-6 flex flex-col justify-between relative overflow-hidden">
-        {/* Decorative Grid Lines */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:40px_40px] opacity-20 pointer-events-none"></div>
-
-        {/* Floating Scanner Sweep Decoration */}
-        <div className="absolute inset-0 bg-gradient-to-t from-neon-aqua/5 via-transparent to-transparent h-1/2 w-full animate-[pulse_3s_infinite] pointer-events-none"></div>
-
-        {/* Fallback Headers */}
-        <div className="flex justify-between items-center z-10 bg-slate-900/90 border border-slate-800 p-3 rounded-xl text-white">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-neon-aqua" />
-            <span className="text-xs font-black uppercase tracking-wider font-mono">
-              Proximity Alert Scanner
-            </span>
-          </div>
-          <div className="text-[10px] bg-slate-950 text-neon-aqua/80 px-2 py-0.5 rounded font-mono font-bold uppercase">
-            Standby Mode
-          </div>
-        </div>
-
-        {/* Vector Positioning Center Grid */}
-        <div className="flex-grow flex flex-col items-center justify-center z-10 text-center py-6">
-          <div className="relative w-36 h-36 border-4 border-dashed border-neon-pink/40 rounded-full flex items-center justify-center animate-[spin_20s_linear_infinite] mb-4">
-            <Compass className="w-16 h-16 text-neon-aqua/80 opacity-60" />
-            <div className="absolute w-2 h-2 bg-neon-aqua rounded-full"></div>
-          </div>
-
-          <h4 className="text-sm font-black uppercase tracking-widest text-white leading-tight">
-            Precision Live Visualizer
-          </h4>
-          <p className="text-slate-400 text-xs font-semibold max-w-xs mt-1">
-            Tracking {assets.length} anchored points of interest against {alerts.length} convective polygons.
-          </p>
-
-          <div className="mt-4 flex flex-wrap gap-2 justify-center max-w-sm">
-            <div className="text-[10px] bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 bg-blue-500 rounded-full inline-block pulsing-dot"></span>
-              <span className="font-bold text-slate-300">USER ({userLat.toFixed(2)}, {userLon.toFixed(2)})</span>
-            </div>
-            {assets.slice(0, 2).map((a) => (
-              <div key={a.id} className="text-[10px] bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 bg-neon-aqua rounded-full inline-block"></span>
-                <span className="font-bold text-slate-300 truncate max-w-[100px]">{a.name}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Distance calculations tracker */}
-        <div className="z-10 bg-slate-900/90 border border-slate-800 p-3 rounded-xl divide-y divide-slate-800 font-mono">
-          <div className="pb-1.5 flex justify-between text-[10px] font-bold text-slate-400">
-            <span>MONITORED ANCHOR</span>
-            <span>CLOSEST EDGE RANGE</span>
-          </div>
-          {assets.length === 0 ? (
-            <div className="pt-2 text-[10px] font-semibold text-center text-slate-500 uppercase">
-              No locations pinned — system tracking broad warning coverage
-            </div>
-          ) : (
-            assets.slice(0, 3).map((asset) => {
-              // Find closest warning distance
-              let bestDist = 999;
-              alerts.forEach((alert) => {
-                const d = alert.geometry?.coordinates ? (() => { const r = getMemoizedMinPolygonDistance(asset.id, asset.lat, asset.lon, alert.id, alert.geometry.coordinates); return r.isInside ? 0 : r.minDist; })() : alert.minDist;
-                if (d < bestDist) {
-                  bestDist = d;
-                }
-              });
-
-              return (
-                <div key={asset.id} className="pt-2 flex justify-between items-center text-xs">
-                  <span className="font-bold uppercase text-white tracking-tight truncate max-w-[160px]">{asset.name}</span>
-                  <span className="font-black text-neon-pink">
-                    {bestDist < 999 ? `${bestDist.toFixed(1)} MILES` : 'CLEARED ZONE'}
-                  </span>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -1424,17 +1251,6 @@ export default function RadarMap({
             <Compass className="w-4 h-4 text-rose-500 dark:text-neon-pink" /> 
             Live Radar Overlays
           </span>
-          <label className="flex items-center gap-1.5 cursor-pointer bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-2.5 py-1 rounded-full hover:border-rose-500/50 dark:hover:border-neon-pink/50 transition-all select-none">
-            <input
-              type="checkbox"
-              checked={showHeatmap}
-              onChange={(e) => setShowHeatmap(e.target.checked)}
-              className="w-3.5 h-3.5 accent-neon-pink rounded cursor-pointer"
-            />
-            <span className="text-[9px] font-black uppercase tracking-wider text-slate-500 hover:text-slate-800 dark:hover:text-slate-300">
-              Threat Heatmap
-            </span>
-          </label>
         </div>
         
         <div className="flex flex-wrap gap-1.5 bg-white dark:bg-slate-950 p-1 rounded-full border border-slate-200 dark:border-slate-800 transition-colors">
@@ -1648,16 +1464,12 @@ export default function RadarMap({
                   </div>
                 </div>
 
-                {/* 3. Potential Rotation & Hotspots */}
+                {/* 3. Potential Rotation */}
                 <div className="pt-2 border-t border-slate-900 space-y-1.5">
                   <div className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest">Doppler Hazards</div>
                   <div className="flex items-center gap-2">
                     <span className="inline-block text-[10px] leading-none animate-[spin_5s_linear_infinite]">O</span>
                     <span>Convective Rotation Coupling</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-red-600/40 border border-red-500/60 inline-block"></span>
-                    <span>Severe Climatology Hotspot</span>
                   </div>
                 </div>
 
