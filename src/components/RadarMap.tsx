@@ -843,7 +843,10 @@ export default function RadarMap({
       alerts.forEach((alert) => {
         if (!alert.keywords?.vector || !alert.geometry || !alert.geometry.coordinates) return;
 
-        const centroid = getGeometryCentroid(alert.geometry.coordinates);
+        const centroid =
+          alert.stormCoreLat !== undefined && alert.stormCoreLon !== undefined
+            ? { lat: alert.stormCoreLat, lon: alert.stormCoreLon }
+            : getGeometryCentroid(alert.geometry.coordinates);
         if (!centroid) return;
 
         const [dir, speedStr, unit] = alert.keywords.vector;
@@ -971,16 +974,27 @@ export default function RadarMap({
           const result = getMemoizedMinPolygonDistance(asset.id, asset.lat, asset.lon, alert.id, alert.geometry.coordinates);
           if (!result.closestPt) return;
 
-          const bearingToAsset = getBearing(result.closestPt[1], result.closestPt[0], asset.lat, asset.lon);
-          const diff = Math.abs(bearing - bearingToAsset);
-          const isHeading = Math.min(diff, 360 - diff) < 45; // within 45 degrees tracking envelope
+          const startLat = result.isInside ? centroid.lat : result.closestPt[1];
+          const startLon = result.isInside ? centroid.lon : result.closestPt[0];
+          const targetDist = result.isInside
+            ? getDistance(centroid.lat, centroid.lon, asset.lat, asset.lon)
+            : result.minDist;
 
-          if (isHeading && result.minDist < 150) {
-            const assetEta = Math.round((result.minDist / speed) * 60);
+          const bearingToAsset = getBearing(startLat, startLon, asset.lat, asset.lon);
+          const diff = Math.abs(bearing - bearingToAsset);
+          const coreBearingToAsset = getBearing(centroid.lat, centroid.lon, asset.lat, asset.lon);
+          const coreDiff = Math.abs(bearing - coreBearingToAsset);
+
+          const isHeading = result.isInside
+            ? Math.min(coreDiff, 360 - coreDiff) <= 60
+            : Math.min(diff, 360 - diff) <= 45 || Math.min(coreDiff, 360 - coreDiff) <= 45;
+
+          if (isHeading && targetDist > 0 && targetDist < 150) {
+            const assetEta = Math.max(1, Math.round((targetDist / speed) * 60));
             
-            // Draw a visual trajectory connection line from nearest edge of warning polygon directly to saved location
+            // Draw a visual trajectory connection line from nearest polygon edge (or storm core if inside) directly to saved location
             const connectionCoords: [number, number][] = [
-              [result.closestPt[1], result.closestPt[0]],
+              [startLat, startLon],
               [asset.lat, asset.lon]
             ];
 
@@ -1002,7 +1016,7 @@ export default function RadarMap({
                   Storm tracking model projects impact path intersecting this saved location.
                 </p>
                 <div class="mt-2 pt-1.5 border-t border-slate-100 flex flex-col gap-1 text-[9px] text-slate-500 font-mono">
-                  <div class="flex justify-between"><span>DISTANCE:</span> <b class="text-slate-800">${result.minDist.toFixed(1)} miles</b></div>
+                  <div class="flex justify-between"><span>${result.isInside ? 'CORE DIST:' : 'EDGE DIST:'}</span> <b class="text-slate-800">${targetDist.toFixed(1)} miles</b></div>
                   <div class="flex justify-between"><span>HEADING:</span> <b class="text-slate-800">${dir} (${bearing}°)</b></div>
                   <div class="flex justify-between"><span>STORM SPEED:</span> <b class="text-slate-800">${speed} MPH</b></div>
                   <div class="flex justify-between text-rose-500 font-bold border-t border-dashed border-slate-100 pt-1 mt-0.5">
@@ -1016,8 +1030,8 @@ export default function RadarMap({
             polygonLayersRef.current.push(connectionLine);
 
             // Midpoint visual ETA status badge
-            const midLat = (result.closestPt[1] + asset.lat) / 2;
-            const midLon = (result.closestPt[0] + asset.lon) / 2;
+            const midLat = (startLat + asset.lat) / 2;
+            const midLon = (startLon + asset.lon) / 2;
 
             const badgeHtml = `
               <div class="relative flex items-center justify-center">
@@ -1042,7 +1056,7 @@ export default function RadarMap({
                     ETA Timeline Tracker
                   </div>
                   <p class="text-[10px] mt-1 text-slate-700 leading-tight">
-                    Estimated storm core arrival at <b>${asset.name}</b> in approximately <b>${assetEta} minutes</b>.
+                    Estimated storm ${result.isInside ? 'core' : 'boundary'} arrival at <b>${asset.name}</b> in approximately <b>${assetEta} minutes</b>.
                   </p>
                 </div>
               `);
@@ -1057,7 +1071,10 @@ export default function RadarMap({
       threatSource.forEach((alert) => {
         if (alert.threatLevel === 'High' || alert.threatLevel === 'Extreme') {
           if (!alert.geometry || !alert.geometry.coordinates) return;
-          const centroid = getGeometryCentroid(alert.geometry.coordinates);
+          const centroid =
+            alert.stormCoreLat !== undefined && alert.stormCoreLon !== undefined
+              ? { lat: alert.stormCoreLat, lon: alert.stormCoreLon }
+              : getGeometryCentroid(alert.geometry.coordinates);
           if (!centroid) return;
 
           const isExtreme = alert.threatLevel === 'Extreme';

@@ -19,9 +19,11 @@ import {
   formatAddress,
   cardinalBearings,
   parseSPCLatLon,
+  getParsedPolygonCentroid,
   isPointInParsedPolygon,
   getParsedPolygonMinDistance,
   parseStormTrajectory,
+  extractNWSStormCorePosition,
 } from './utils/geoUtils';
 import {
   syncAnonymousStormTelemetry,
@@ -219,10 +221,16 @@ function parseMesoscaleDiscussion(id: string, issuanceTime: string, text: string
   if (coordinates.length > 0) {
     const lats = coordinates.map((c) => c.lat);
     const lons = coordinates.map((c) => c.lon);
-    centroid = {
-      lat: Number((lats.reduce((a, b) => a + b, 0) / lats.length).toFixed(4)),
-      lon: Number((lons.reduce((a, b) => a + b, 0) / lons.length).toFixed(4)),
-    };
+    const polyCenter = getParsedPolygonCentroid(coordinates);
+    centroid = polyCenter
+      ? {
+          lat: Number(polyCenter.lat.toFixed(4)),
+          lon: Number(polyCenter.lon.toFixed(4)),
+        }
+      : {
+          lat: Number((lats.reduce((a, b) => a + b, 0) / lats.length).toFixed(4)),
+          lon: Number((lons.reduce((a, b) => a + b, 0) / lons.length).toFixed(4)),
+        };
     watchBox = {
       minLat: Number(Math.min(...lats).toFixed(4)),
       maxLat: Number(Math.max(...lats).toFixed(4)),
@@ -310,8 +318,11 @@ function translateAlertsToRotationPins(activeAlerts: NWSAlert[]): RotationPin[] 
       fullText.includes('CATASTROPHIC DAMAGE THREAT') ||
       upperEvent.includes('TORNADO EMERGENCY');
 
-    if (hasRotation && alert.geometry && alert.geometry.coordinates) {
-      const centroid = getGeometryCentroid(alert.geometry.coordinates);
+    if (hasRotation && ((alert.stormCoreLat !== undefined && alert.stormCoreLon !== undefined) || (alert.geometry && alert.geometry.coordinates))) {
+      const centroid =
+        alert.stormCoreLat !== undefined && alert.stormCoreLon !== undefined
+          ? { lat: alert.stormCoreLat, lon: alert.stormCoreLon }
+          : getGeometryCentroid(alert.geometry?.coordinates);
       if (centroid) {
         let pinType: 'vortex' | 'radar_indicated' | 'mesocyclone' = 'mesocyclone';
         let threatLevel: 'Normal' | 'Severe' | 'Extreme' = 'Normal';
@@ -1510,47 +1521,79 @@ function App() {
       let isHeadingTowards = false;
       let calculatedEta: number | undefined = undefined;
 
-      if (effectiveAssets.length > 0) {
-        // Compute distance & direction to storm polygon centroid (core)
-        if (feature.geometry && feature.geometry.coordinates) {
-          const polyCentroid = getGeometryCentroid(feature.geometry.coordinates);
-          if (polyCentroid) {
-            let minCoreDist = 9999;
-            effectiveAssets.forEach((a) => {
-              const d = getDistance(a.lat, a.lon, polyCentroid.lat, polyCentroid.lon);
-              if (d < minCoreDist) {
-                minCoreDist = d;
-                const b = getBearing(a.lat, a.lon, polyCentroid.lat, polyCentroid.lon);
-                centroidDist = d;
-                centroidDir = bearingToCompass16(b);
-                closestAssetName = a.name;
-              }
-            });
-          }
+      let stormCoreLat: number | undefined = undefined;
+      let stormCoreLon: number | undefined = undefined;
+      let isRadarPinpoint: boolean | undefined = undefined;
 
+      const hasPolygonGeometry = Boolean(
+        feature.geometry &&
+          Array.isArray(feature.geometry.coordinates) &&
+          feature.geometry.coordinates.length > 0
+      );
+
+      if (effectiveAssets.length > 0) {
+        let primaryAsset: LocationAsset = effectiveAssets[0];
+
+        if (hasPolygonGeometry) {
           let calculatedMin = 9999;
           let closestPt: [number, number] | null = null;
-          let closestAssetForEdge: LocationAsset = effectiveAssets[0];
           let insidePoly = false;
 
           const alertId = props.id || feature.id || '';
           effectiveAssets.forEach((a) => {
-            const result = getMemoizedMinPolygonDistance(a.id, a.lat, a.lon, alertId, feature.geometry.coordinates);
-            if (result.isInside) {
+            const result = getMemoizedMinPolygonDistance(
+              a.id,
+              a.lat,
+              a.lon,
+              alertId,
+              feature.geometry.coordinates
+            );
+            if (result.isInside && !insidePoly) {
               insidePoly = true;
-              closestAssetName = a.name;
-            }
-            if (result.minDist < calculatedMin) {
+              primaryAsset = a;
               calculatedMin = result.minDist;
               closestPt = result.closestPt;
-              closestAssetForEdge = a;
+            } else if (!insidePoly && result.minDist < calculatedMin) {
+              calculatedMin = result.minDist;
+              closestPt = result.closestPt;
+              primaryAsset = a;
             }
           });
 
+          closestAssetName = primaryAsset.name;
+
+          // Extract exact NWS TIME...MOT...LOC Doppler radar fix coordinate (with fallback to polygon centroid)
+          const polyCentroid = extractNWSStormCorePosition(
+            props,
+            feature.geometry.coordinates,
+            primaryAsset.lat,
+            primaryAsset.lon
+          );
+
+          // Compute distance & compass bearing from the primary user anchor to the storm core
+          if (polyCentroid) {
+            stormCoreLat = polyCentroid.lat;
+            stormCoreLon = polyCentroid.lon;
+            isRadarPinpoint = polyCentroid.isRadarPinpoint;
+            centroidDist = getDistance(
+              primaryAsset.lat,
+              primaryAsset.lon,
+              polyCentroid.lat,
+              polyCentroid.lon
+            );
+            const bCore = getBearing(
+              primaryAsset.lat,
+              primaryAsset.lon,
+              polyCentroid.lat,
+              polyCentroid.lon
+            );
+            centroidDir = bearingToCompass16(bCore);
+          }
+
           if (closestPt && calculatedMin < 9999) {
             const bEdge = getBearing(
-              closestAssetForEdge.lat,
-              closestAssetForEdge.lon,
+              primaryAsset.lat,
+              primaryAsset.lon,
               closestPt[1],
               closestPt[0]
             );
@@ -1562,10 +1605,9 @@ function App() {
             matchedInZone = true;
           } else if (closestPt && calculatedMin < 9999) {
             shortestDistance = calculatedMin;
-            closestAssetName = closestAssetForEdge.name;
           }
 
-          // Trajectory projection supporting both cardinal words and degrees (works both outside and inside polygon)
+          // Trajectory projection supporting both cardinal words and degrees
           if (vectorMatch) {
             const normalizedDir = normalizeDirection(vectorMatch[0]);
             let stormDir: number | undefined = undefined;
@@ -1576,54 +1618,128 @@ function App() {
             }
 
             if (stormDir !== undefined) {
-              const refPt = polyCentroid
-                ? ([polyCentroid.lon, polyCentroid.lat] as [number, number])
-                : closestPt;
-              if (refPt) {
-                isHeadingTowards = effectiveAssets.some((a) => {
-                  const bearingToAsset = getBearing(refPt[1], refPt[0], a.lat, a.lon);
-                  const diff = Math.abs(stormDir! - bearingToAsset);
-                  return Math.min(diff, 360 - diff) < 45;
-                });
-              }
+              isHeadingTowards = effectiveAssets.some((a) => {
+                const res = getMemoizedMinPolygonDistance(
+                  a.id,
+                  a.lat,
+                  a.lon,
+                  alertId,
+                  feature.geometry.coordinates
+                );
+
+                // If user is inside the polygon, check if the storm core is upstream and moving toward them
+                if (res.isInside) {
+                  if (!polyCentroid) return false;
+                  const coreToAssetBearing = getBearing(
+                    polyCentroid.lat,
+                    polyCentroid.lon,
+                    a.lat,
+                    a.lon
+                  );
+                  const diffCore = Math.abs(stormDir! - coreToAssetBearing);
+                  return Math.min(diffCore, 360 - diffCore) <= 60;
+                }
+
+                // If user is outside the polygon, check if either the nearest polygon boundary or the storm core is heading toward them
+                let edgeHeading = false;
+                if (res.closestPt) {
+                  const edgeToAssetBearing = getBearing(
+                    res.closestPt[1],
+                    res.closestPt[0],
+                    a.lat,
+                    a.lon
+                  );
+                  const diffEdge = Math.abs(stormDir! - edgeToAssetBearing);
+                  edgeHeading = Math.min(diffEdge, 360 - diffEdge) <= 45;
+                }
+
+                let coreHeading = false;
+                if (polyCentroid) {
+                  const coreToAssetBearing = getBearing(
+                    polyCentroid.lat,
+                    polyCentroid.lon,
+                    a.lat,
+                    a.lon
+                  );
+                  const diffCore = Math.abs(stormDir! - coreToAssetBearing);
+                  coreHeading = Math.min(diffCore, 360 - diffCore) <= 45;
+                }
+
+                return edgeHeading || coreHeading;
+              });
             }
 
-            if (isHeadingTowards || insidePoly) {
+            if (isHeadingTowards) {
               let speed = parseInt(vectorMatch[1], 10);
               const unit = vectorMatch[2].toUpperCase();
               if (unit.startsWith('KT') || unit.startsWith('KNOT')) {
                 speed = Math.round(speed * 1.15);
               }
-              const targetDist = shortestDistance > 0 && shortestDistance < 999 ? shortestDistance : (centroidDist ?? 0);
+              const targetDist =
+                !insidePoly && shortestDistance > 0 && shortestDistance < 999
+                  ? shortestDistance
+                  : (centroidDist ?? 0);
               if (speed > 0 && targetDist > 0) {
                 calculatedEta = Math.max(1, Math.round((targetDist / speed) * 60));
               }
             }
           }
+        } else {
+          // Even if an alert has no polygon geometry, check if it has a TIME...MOT...LOC Doppler radar fix
+          const radarCore = extractNWSStormCorePosition(
+            props,
+            undefined,
+            primaryAsset.lat,
+            primaryAsset.lon
+          );
+          if (radarCore) {
+            stormCoreLat = radarCore.lat;
+            stormCoreLon = radarCore.lon;
+            isRadarPinpoint = radarCore.isRadarPinpoint;
+            centroidDist = getDistance(
+              primaryAsset.lat,
+              primaryAsset.lon,
+              radarCore.lat,
+              radarCore.lon
+            );
+            const bCore = getBearing(
+              primaryAsset.lat,
+              primaryAsset.lon,
+              radarCore.lat,
+              radarCore.lon
+            );
+            centroidDir = bearingToCompass16(bCore);
+          }
         }
 
-        // Zone Name & Exact Point Lookup Fallback (Trigger logic for County-based Watches & Warnings)
-        // Note: Do NOT overwrite shortestDistance to 0 if we already measured a real geometric polygon distance!
+        // Exact NWS Point-in-Polygon API Lookup (`?point=lat,lon`)
         const alertFeatureId = props.id || feature.id || '';
         if (alertFeatureId && pointDirectHitIdsRef.current.has(alertFeatureId)) {
           matchedInZone = true;
-          if (shortestDistance === 999) shortestDistance = 0;
-        }
-        effectiveAssets.forEach((asset) => {
-          const cleanedName = asset.name.toUpperCase().replace(/ COUNTY| PARISH/g, '');
-          const nameTokens = cleanedName
-            .split(/[,()]/)
-            .map((t) => t.trim())
-            .filter((t) => t.length > 3 && t !== 'CURRENT POSITION');
-          if (
-            props.areaDesc &&
-            nameTokens.some((token) => props.areaDesc.toUpperCase().includes(token))
-          ) {
-            matchedInZone = true;
-            closestAssetName = asset.name;
-            if (shortestDistance === 999) shortestDistance = 0;
+          if (!hasPolygonGeometry && shortestDistance === 999) {
+            shortestDistance = 0;
           }
-        });
+        }
+
+        // County / Zone Name Fallback ONLY for alerts that do NOT have explicit polygon geometry
+        // (Prevents county-wide `areaDesc` text from falsely marking a user as "INSIDE POLYGON" when the warning polygon only covers a different part of the county)
+        if (!hasPolygonGeometry) {
+          effectiveAssets.forEach((asset) => {
+            const cleanedName = asset.name.toUpperCase().replace(/ COUNTY| PARISH/g, '');
+            const nameTokens = cleanedName
+              .split(/[,()]/)
+              .map((t) => t.trim())
+              .filter((t) => t.length > 3 && t !== 'CURRENT POSITION');
+            if (
+              props.areaDesc &&
+              nameTokens.some((token) => props.areaDesc.toUpperCase().includes(token))
+            ) {
+              matchedInZone = true;
+              closestAssetName = asset.name;
+              if (shortestDistance === 999) shortestDistance = 0;
+            }
+          });
+        }
       }
 
       const alertSig = `${props.id}-${shortestDistance < 999 ? shortestDistance.toFixed(1) : 'NA'}-${snippet}`;
@@ -1670,6 +1786,10 @@ function App() {
       }
 
       const finalId = props.id || feature.id || Math.random().toString();
+      const coreCacheKey =
+        stormCoreLat !== undefined && stormCoreLon !== undefined
+          ? `${finalId}_${stormCoreLat.toFixed(3)}_${stormCoreLon.toFixed(3)}`
+          : finalId;
 
       processedList.push({
         id: finalId,
@@ -1688,7 +1808,10 @@ function App() {
         radarLocationHeadline,
         impactedLocations,
         maxWindHailTag,
-        stormCoreAddress: stormCoreCacheRef.current[finalId] || stormCoreAddresses[finalId],
+        stormCoreAddress: stormCoreCacheRef.current[coreCacheKey] || stormCoreAddresses[finalId],
+        stormCoreLat,
+        stormCoreLon,
+        isRadarPinpoint,
         isDirectHit: matchedInZone,
         headedTowards: isHeadingTowards,
         etaMinutes: calculatedEta,
@@ -1761,15 +1884,27 @@ function App() {
     previousSignaturesRef.current = currentSignatures;
   };
 
-  // Free OpenStreetMap Nominatim reverse-geocoding for storm radar centroids on nearby warnings
+  // Free OpenStreetMap Nominatim reverse-geocoding for exact NWS TIME...MOT...LOC Doppler radar storm cores
   useEffect(() => {
-    const candidates = alerts.filter(
-      (a) =>
-        !a.event.toUpperCase().includes('WATCH') &&
-        a.geometry?.coordinates &&
-        (a.isDirectHit || a.minDist <= 50 || (a.centroidDist !== undefined && a.centroidDist <= 50)) &&
-        !stormCoreCacheRef.current[a.id]
-    ).slice(0, 3);
+    const candidates = alerts
+      .filter((a) => {
+        if (a.event.toUpperCase().includes('WATCH')) return false;
+        const hasCore =
+          (a.stormCoreLat !== undefined && a.stormCoreLon !== undefined) ||
+          Boolean(a.geometry?.coordinates);
+        if (!hasCore) return false;
+        const isNearby =
+          a.isDirectHit ||
+          a.minDist <= 50 ||
+          (a.centroidDist !== undefined && a.centroidDist <= 50);
+        if (!isNearby) return false;
+        const cacheKey =
+          a.stormCoreLat !== undefined && a.stormCoreLon !== undefined
+            ? `${a.id}_${a.stormCoreLat.toFixed(3)}_${a.stormCoreLon.toFixed(3)}`
+            : a.id;
+        return !stormCoreCacheRef.current[cacheKey];
+      })
+      .slice(0, 3);
 
     if (candidates.length === 0) return;
 
@@ -1777,9 +1912,16 @@ function App() {
     (async () => {
       for (const alert of candidates) {
         if (cancelled) break;
-        const centroid = getGeometryCentroid(alert.geometry?.coordinates);
+        const centroid =
+          alert.stormCoreLat !== undefined && alert.stormCoreLon !== undefined
+            ? { lat: alert.stormCoreLat, lon: alert.stormCoreLon }
+            : getGeometryCentroid(alert.geometry?.coordinates);
         if (!centroid) continue;
-        stormCoreCacheRef.current[alert.id] = 'Resolving...';
+        const cacheKey =
+          alert.stormCoreLat !== undefined && alert.stormCoreLon !== undefined
+            ? `${alert.id}_${alert.stormCoreLat.toFixed(3)}_${alert.stormCoreLon.toFixed(3)}`
+            : alert.id;
+        stormCoreCacheRef.current[cacheKey] = 'Resolving...';
         try {
           const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${centroid.lat.toFixed(4)}&lon=${centroid.lon.toFixed(4)}&zoom=16&addressdetails=1`;
           const res = await fetch(url, {
@@ -1793,7 +1935,7 @@ function App() {
             const state = addr.state || '';
             const parts = [road ? `Near ${road}` : '', locality, state].filter(Boolean);
             const formatted = parts.length > 0 ? parts.join(', ') : formatAddress(addr, `${centroid.lat.toFixed(3)}, ${centroid.lon.toFixed(3)}`);
-            stormCoreCacheRef.current[alert.id] = formatted;
+            stormCoreCacheRef.current[cacheKey] = formatted;
             if (!cancelled) {
               setStormCoreAddresses((prev) => ({ ...prev, [alert.id]: formatted }));
               setAlerts((prev) =>

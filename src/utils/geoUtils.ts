@@ -112,46 +112,93 @@ export function getMinPolygonDistance(
   let closestPt: [number, number] | null = null;
   let isInside = false;
 
-  function traverse(arr: any) {
-    if (!Array.isArray(arr)) return;
+  const isRing = (arr: any): boolean =>
+    Array.isArray(arr) &&
+    arr.length > 0 &&
+    Array.isArray(arr[0]) &&
+    typeof arr[0][0] === 'number' &&
+    typeof arr[0][1] === 'number';
 
-    if (
-      arr.length >= 2 &&
-      typeof arr[0] === 'number' &&
-      typeof arr[1] === 'number'
-    ) {
-      // longitude is index 0, latitude is index 1
+  const isPolygonCoords = (arr: any): boolean =>
+    Array.isArray(arr) && arr.length > 0 && isRing(arr[0]);
+
+  function evaluateRingSegments(ringRaw: any[]) {
+    const ring: [number, number][] = ringRaw.map((pt: any) => [pt[0], pt[1]]);
+    for (let i = 0; i < ring.length; i++) {
+      const p1 = ring[i];
+      const p2 = ring[(i + 1) % ring.length];
+      const { dist, pt } = getClosestPointOnSegment(
+        assetLat,
+        assetLon,
+        p1[1],
+        p1[0],
+        p2[1],
+        p2[0]
+      );
+      if (dist < minDist) {
+        minDist = dist;
+        closestPt = pt;
+      }
+    }
+  }
+
+  function evaluatePolygon(rings: any[]) {
+    if (!rings || rings.length === 0) return;
+    const outerRing: [number, number][] = rings[0].map((pt: any) => [pt[0], pt[1]]);
+    let inPoly = isPointInPolygon(assetLat, assetLon, outerRing);
+
+    // If inside the outer ring, ensure the point is not inside an interior hole ring
+    if (inPoly && rings.length > 1) {
+      for (let h = 1; h < rings.length; h++) {
+        if (isRing(rings[h])) {
+          const holeRing: [number, number][] = rings[h].map((pt: any) => [pt[0], pt[1]]);
+          if (isPointInPolygon(assetLat, assetLon, holeRing)) {
+            inPoly = false;
+            break;
+          }
+        }
+      }
+    }
+
+    if (inPoly) {
+      isInside = true;
+    }
+
+    for (let r = 0; r < rings.length; r++) {
+      if (isRing(rings[r])) {
+        evaluateRingSegments(rings[r]);
+      }
+    }
+  }
+
+  function traverse(arr: any) {
+    if (!Array.isArray(arr) || arr.length === 0) return;
+
+    if (typeof arr[0] === 'number' && typeof arr[1] === 'number') {
       const d = getDistance(assetLat, assetLon, arr[1], arr[0]);
       if (d < minDist) {
         minDist = d;
         closestPt = [arr[0], arr[1]];
       }
-    } else {
-      if (Array.isArray(arr[0]) && typeof arr[0][0] === 'number') {
-        const ring: [number, number][] = arr.map((pt: any) => [pt[0], pt[1]]);
-        if (isPointInPolygon(assetLat, assetLon, ring)) {
-          isInside = true;
-        }
-        for (let i = 0; i < ring.length; i++) {
-          const p1 = ring[i];
-          const p2 = ring[(i + 1) % ring.length];
-          const { dist, pt } = getClosestPointOnSegment(
-            assetLat,
-            assetLon,
-            p1[1],
-            p1[0],
-            p2[1],
-            p2[0]
-          );
-          if (dist < minDist) {
-            minDist = dist;
-            closestPt = pt;
-          }
-        }
+      return;
+    }
+
+    if (isRing(arr)) {
+      const ring: [number, number][] = arr.map((pt: any) => [pt[0], pt[1]]);
+      if (isPointInPolygon(assetLat, assetLon, ring)) {
+        isInside = true;
       }
-      for (let i = 0; i < arr.length; i++) {
-        traverse(arr[i]);
-      }
+      evaluateRingSegments(arr);
+      return;
+    }
+
+    if (isPolygonCoords(arr)) {
+      evaluatePolygon(arr);
+      return;
+    }
+
+    for (let i = 0; i < arr.length; i++) {
+      traverse(arr[i]);
     }
   }
 
@@ -196,31 +243,102 @@ export function getMemoizedMinPolygonDistance(
 }
 
 export function getGeometryCentroid(geometryCoordinates: any): { lat: number; lon: number } | null {
-  let sumLat = 0;
-  let sumLon = 0;
-  let count = 0;
+  let totalWeightedLat = 0;
+  let totalWeightedLon = 0;
+  let totalArea = 0;
+
+  let fallbackSumLat = 0;
+  let fallbackSumLon = 0;
+  let fallbackCount = 0;
+
+  const isRing = (arr: any): boolean =>
+    Array.isArray(arr) &&
+    arr.length > 0 &&
+    Array.isArray(arr[0]) &&
+    typeof arr[0][0] === 'number' &&
+    typeof arr[0][1] === 'number';
+
+  function processRing(ring: [number, number][]) {
+    if (ring.length === 0) return;
+
+    // Exclude duplicate GeoJSON closing vertex for unique vertex fallback average
+    const uniqueLen =
+      ring.length > 1 &&
+      Math.abs(ring[0][0] - ring[ring.length - 1][0]) < 1e-7 &&
+      Math.abs(ring[0][1] - ring[ring.length - 1][1]) < 1e-7
+        ? ring.length - 1
+        : ring.length;
+
+    for (let i = 0; i < uniqueLen; i++) {
+      fallbackSumLon += ring[i][0];
+      fallbackSumLat += ring[i][1];
+      fallbackCount++;
+    }
+
+    if (uniqueLen < 3) return;
+
+    // Shoelace formula for true geometric centroid of the polygon ring
+    // Use first vertex as local origin to preserve floating-point precision
+    const originLon = ring[0][0];
+    const originLat = ring[0][1];
+    let signedArea2 = 0;
+    let cxAcc = 0;
+    let cyAcc = 0;
+
+    for (let i = 0; i < uniqueLen; i++) {
+      const x0 = ring[i][0] - originLon;
+      const y0 = ring[i][1] - originLat;
+      const next = ring[(i + 1) % uniqueLen];
+      const x1 = next[0] - originLon;
+      const y1 = next[1] - originLat;
+
+      const cross = x0 * y1 - x1 * y0;
+      signedArea2 += cross;
+      cxAcc += (x0 + x1) * cross;
+      cyAcc += (y0 + y1) * cross;
+    }
+
+    const ringArea = Math.abs(signedArea2) / 2;
+    if (ringArea > 1e-9) {
+      const cx = originLon + cxAcc / (3 * signedArea2);
+      const cy = originLat + cyAcc / (3 * signedArea2);
+      totalWeightedLon += cx * ringArea;
+      totalWeightedLat += cy * ringArea;
+      totalArea += ringArea;
+    }
+  }
 
   function traverse(arr: any) {
-    if (!Array.isArray(arr)) return;
+    if (!Array.isArray(arr) || arr.length === 0) return;
 
-    if (
-      arr.length >= 2 &&
-      typeof arr[0] === 'number' &&
-      typeof arr[1] === 'number'
-    ) {
-      sumLon += arr[0];
-      sumLat += arr[1];
-      count++;
-    } else {
-      for (let i = 0; i < arr.length; i++) {
-        traverse(arr[i]);
-      }
+    if (typeof arr[0] === 'number' && typeof arr[1] === 'number') {
+      fallbackSumLon += arr[0];
+      fallbackSumLat += arr[1];
+      fallbackCount++;
+      return;
+    }
+
+    if (isRing(arr)) {
+      processRing(arr as [number, number][]);
+      return;
+    }
+
+    for (let i = 0; i < arr.length; i++) {
+      traverse(arr[i]);
     }
   }
 
   traverse(geometryCoordinates);
-  if (count > 0) {
-    return { lat: sumLat / count, lon: sumLon / count };
+
+  if (totalArea > 1e-9) {
+    return {
+      lat: totalWeightedLat / totalArea,
+      lon: totalWeightedLon / totalArea,
+    };
+  }
+
+  if (fallbackCount > 0) {
+    return { lat: fallbackSumLat / fallbackCount, lon: fallbackSumLon / fallbackCount };
   }
   return null;
 }
@@ -320,18 +438,36 @@ export function parseSPCLatLon(text: string): { lat: number; lon: number }[] {
     const latStr = match.substring(0, 4);
     const lonStr = match.substring(4, 8);
     
-    let lat = parseInt(latStr, 10) / 100;
+    const lat = parseInt(latStr, 10) / 100;
     let lon = parseInt(lonStr, 10) / 100;
     
-    if (lon < 50) {
+    // SPC 8-digit LAT...LON format omits the leading '1' for longitudes >= 100.00°W (00.00 to 59.99)
+    if (lon < 60) {
       lon += 100;
     }
     
     lon = -lon;
     coordinates.push({ lat, lon });
   }
+
+  // Strip duplicate closing vertex if SPC repeated the first point at the end of the LAT...LON list
+  if (coordinates.length > 2) {
+    const first = coordinates[0];
+    const last = coordinates[coordinates.length - 1];
+    if (Math.abs(first.lat - last.lat) < 1e-5 && Math.abs(first.lon - last.lon) < 1e-5) {
+      coordinates.pop();
+    }
+  }
   
   return coordinates;
+}
+
+export function getParsedPolygonCentroid(
+  polygon: { lat: number; lon: number }[]
+): { lat: number; lon: number } | null {
+  if (!polygon || polygon.length === 0) return null;
+  const ring: [number, number][] = polygon.map((p) => [p.lon, p.lat]);
+  return getGeometryCentroid([ring]);
 }
 
 export function isPointInParsedPolygon(lat: number, lon: number, polygon: { lat: number; lon: number }[]): boolean {
@@ -437,6 +573,22 @@ export function parseStormTrajectory(
     };
   }
 
+  // Fallback to machine-readable TIME...MOT...LOC line (where DEG is direction moving FROM)
+  const tmlMatch = text.match(/TIME\.\.\.MOT\.\.\.LOC\s+\d{4}Z\s+(\d{1,3})DEG\s+(\d{1,3})KT/i);
+  if (tmlMatch) {
+    const fromDeg = parseInt(tmlMatch[1], 10);
+    const toDeg = (fromDeg + 180) % 360;
+    const speedKt = parseInt(tmlMatch[2], 10);
+    if (!isNaN(toDeg) && !isNaN(speedKt) && speedKt > 0) {
+      return {
+        direction: String(toDeg),
+        speed: speedKt,
+        unit: 'KT',
+        hasTrajectory: true,
+      };
+    }
+  }
+
   // If no match is found, check if we actually expected one for this event type
   const isConvectiveWarning = vectorExpectedEvents.some(evt => 
     eventType.toLowerCase().includes(evt.toLowerCase())
@@ -458,5 +610,92 @@ export function parseStormTrajectory(
     hasTrajectory: false
   };
 }
+
+/**
+ * Extracts the exact NWS Doppler radar pinpoint coordinate of the storm core / rotation couplet
+ * from `properties.parameters.eventMotionDescription` or the `TIME...MOT...LOC` block in `description`.
+ * Why this matters: An NWS warning polygon extends 15-25 miles downstream of the tornado/rotation, so the
+ * geometric center of the polygon is often 10+ miles ahead of where the rotation actually is right now.
+ * `TIME...MOT...LOC` is the exact GPS coordinate where the NWS radar meteorologist placed the storm/rotation marker.
+ */
+export function extractNWSStormCorePosition(
+  props: any,
+  geometryCoordinates?: any,
+  referenceLat?: number,
+  referenceLon?: number
+): { lat: number; lon: number; isRadarPinpoint: boolean } | null {
+  const radarPoints: { lat: number; lon: number }[] = [];
+
+  // 1. Check official NWS GeoJSON `parameters.eventMotionDescription`
+  // Format example: ["2026-11-03T08:19:00-00:00...storm...225DEG...39KT...35.81,-94.63"]
+  const emd = props?.parameters?.eventMotionDescription;
+  if (Array.isArray(emd) && emd.length > 0) {
+    for (const entry of emd) {
+      if (typeof entry === 'string') {
+        const pairMatches = entry.matchAll(/(-?\d{2}\.\d+)\s*,\s*(-?\d{2,3}\.\d+)/g);
+        for (const m of pairMatches) {
+          const lat = parseFloat(m[1]);
+          const lon = parseFloat(m[2]);
+          if (!isNaN(lat) && !isNaN(lon) && lat >= 15 && lat <= 72 && lon >= -170 && lon <= -60) {
+            radarPoints.push({ lat, lon });
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Check `TIME...MOT...LOC` in raw description text
+  // Format example: "TIME...MOT...LOC 0819Z 225DEG 39KT 3581 9463" (or multiple lat/lon pairs for a squall line)
+  if (radarPoints.length === 0 && typeof props?.description === 'string') {
+    const tmlMatch = props.description.match(
+      /TIME\.\.\.MOT\.\.\.LOC\s+\d{4}Z\s+\d{1,3}DEG\s+\d{1,3}KT\s+([\d\s]+)/i
+    );
+    if (tmlMatch && tmlMatch[1]) {
+      const nums = tmlMatch[1].trim().split(/\s+/).filter(( tok: string) => /^\d{4,5}$/.test(tok));
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const lat = parseInt(nums[i], 10) / 100;
+        let lon = parseInt(nums[i + 1], 10) / 100;
+        if (lon < 60) {
+          lon += 100;
+        }
+        lon = -lon;
+        if (lat >= 15 && lat <= 72 && lon >= -170 && lon <= -60) {
+          radarPoints.push({ lat, lon });
+        }
+      }
+    }
+  }
+
+  if (radarPoints.length > 0) {
+    if (
+      radarPoints.length > 1 &&
+      referenceLat !== undefined &&
+      referenceLon !== undefined
+    ) {
+      let closest = radarPoints[0];
+      let minD = getDistance(referenceLat, referenceLon, closest.lat, closest.lon);
+      for (let i = 1; i < radarPoints.length; i++) {
+        const d = getDistance(referenceLat, referenceLon, radarPoints[i].lat, radarPoints[i].lon);
+        if (d < minD) {
+          minD = d;
+          closest = radarPoints[i];
+        }
+      }
+      return { lat: closest.lat, lon: closest.lon, isRadarPinpoint: true };
+    }
+    return { lat: radarPoints[0].lat, lon: radarPoints[0].lon, isRadarPinpoint: true };
+  }
+
+  // 3. Fallback to geometric shoelace centroid of the warning polygon
+  if (geometryCoordinates) {
+    const polyCentroid = getGeometryCentroid(geometryCoordinates);
+    if (polyCentroid) {
+      return { lat: polyCentroid.lat, lon: polyCentroid.lon, isRadarPinpoint: false };
+    }
+  }
+
+  return null;
+}
+
 
 

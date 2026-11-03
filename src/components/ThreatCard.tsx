@@ -23,6 +23,9 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
     impactedLocations,
     maxWindHailTag,
     stormCoreAddress,
+    stormCoreLat,
+    stormCoreLon,
+    isRadarPinpoint,
     isDirectHit,
     headedTowards,
     etaMinutes,
@@ -106,6 +109,8 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
         }
       } else if (minDist > 0 && minDist < 999) {
         distanceLabel = `IN COUNTY ZONE • EDGE ${minDist.toFixed(1)} MI ${edgeDir || ''}`;
+      } else if (isWatch) {
+        distanceLabel = `IN WATCH ZONE • ${closestAssetName ? closestAssetName.toUpperCase() : 'YOUR LOCATION'}`;
       } else {
         distanceLabel = `DIRECTLY OVER ${closestAssetName ? closestAssetName.toUpperCase() : 'YOUR LOCATION'}`;
       }
@@ -220,8 +225,17 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
 
             {stormCoreAddress && (
               <div className="text-xs font-bold text-slate-800 dark:text-white bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1.5 rounded-lg">
-                <span className="text-[9px] font-mono font-black uppercase text-cyan-700 dark:text-neon-aqua block">
-                  Nearest Road / Locality Under Storm Core:
+                <span className="text-[9px] font-mono font-black uppercase text-cyan-700 dark:text-neon-aqua flex items-center justify-between gap-2">
+                  <span>
+                    {isRadarPinpoint
+                      ? 'Nearest Road / Locality Under Doppler Radar Fix (TIME...MOT...LOC):'
+                      : 'Nearest Road / Locality Under Storm Core:'}
+                  </span>
+                  {stormCoreLat !== undefined && stormCoreLon !== undefined && (
+                    <span className="text-[8px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
+                      {stormCoreLat.toFixed(2)}°N, {Math.abs(stormCoreLon).toFixed(2)}°W
+                    </span>
+                  )}
                 </span>
                 {stormCoreAddress}
               </div>
