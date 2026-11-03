@@ -573,6 +573,22 @@ export function parseStormTrajectory(
     };
   }
 
+  // Fallback to machine-readable TIME...MOT...LOC line (where DEG is direction moving FROM)
+  const tmlMatch = text.match(/TIME\.\.\.MOT\.\.\.LOC\s+\d{4}Z\s+(\d{1,3})DEG\s+(\d{1,3})KT/i);
+  if (tmlMatch) {
+    const fromDeg = parseInt(tmlMatch[1], 10);
+    const toDeg = (fromDeg + 180) % 360;
+    const speedKt = parseInt(tmlMatch[2], 10);
+    if (!isNaN(toDeg) && !isNaN(speedKt) && speedKt > 0) {
+      return {
+        direction: String(toDeg),
+        speed: speedKt,
+        unit: 'KT',
+        hasTrajectory: true,
+      };
+    }
+  }
+
   // If no match is found, check if we actually expected one for this event type
   const isConvectiveWarning = vectorExpectedEvents.some(evt => 
     eventType.toLowerCase().includes(evt.toLowerCase())
@@ -594,5 +610,92 @@ export function parseStormTrajectory(
     hasTrajectory: false
   };
 }
+
+/**
+ * Extracts the exact NWS Doppler radar pinpoint coordinate of the storm core / rotation couplet
+ * from `properties.parameters.eventMotionDescription` or the `TIME...MOT...LOC` block in `description`.
+ * Why this matters: An NWS warning polygon extends 15-25 miles downstream of the tornado/rotation, so the
+ * geometric center of the polygon is often 10+ miles ahead of where the rotation actually is right now.
+ * `TIME...MOT...LOC` is the exact GPS coordinate where the NWS radar meteorologist placed the storm/rotation marker.
+ */
+export function extractNWSStormCorePosition(
+  props: any,
+  geometryCoordinates?: any,
+  referenceLat?: number,
+  referenceLon?: number
+): { lat: number; lon: number; isRadarPinpoint: boolean } | null {
+  const radarPoints: { lat: number; lon: number }[] = [];
+
+  // 1. Check official NWS GeoJSON `parameters.eventMotionDescription`
+  // Format example: ["2026-11-03T08:19:00-00:00...storm...225DEG...39KT...35.81,-94.63"]
+  const emd = props?.parameters?.eventMotionDescription;
+  if (Array.isArray(emd) && emd.length > 0) {
+    for (const entry of emd) {
+      if (typeof entry === 'string') {
+        const pairMatches = entry.matchAll(/(-?\d{2}\.\d+)\s*,\s*(-?\d{2,3}\.\d+)/g);
+        for (const m of pairMatches) {
+          const lat = parseFloat(m[1]);
+          const lon = parseFloat(m[2]);
+          if (!isNaN(lat) && !isNaN(lon) && lat >= 15 && lat <= 72 && lon >= -170 && lon <= -60) {
+            radarPoints.push({ lat, lon });
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Check `TIME...MOT...LOC` in raw description text
+  // Format example: "TIME...MOT...LOC 0819Z 225DEG 39KT 3581 9463" (or multiple lat/lon pairs for a squall line)
+  if (radarPoints.length === 0 && typeof props?.description === 'string') {
+    const tmlMatch = props.description.match(
+      /TIME\.\.\.MOT\.\.\.LOC\s+\d{4}Z\s+\d{1,3}DEG\s+\d{1,3}KT\s+([\d\s]+)/i
+    );
+    if (tmlMatch && tmlMatch[1]) {
+      const nums = tmlMatch[1].trim().split(/\s+/).filter(( tok: string) => /^\d{4,5}$/.test(tok));
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        const lat = parseInt(nums[i], 10) / 100;
+        let lon = parseInt(nums[i + 1], 10) / 100;
+        if (lon < 60) {
+          lon += 100;
+        }
+        lon = -lon;
+        if (lat >= 15 && lat <= 72 && lon >= -170 && lon <= -60) {
+          radarPoints.push({ lat, lon });
+        }
+      }
+    }
+  }
+
+  if (radarPoints.length > 0) {
+    if (
+      radarPoints.length > 1 &&
+      referenceLat !== undefined &&
+      referenceLon !== undefined
+    ) {
+      let closest = radarPoints[0];
+      let minD = getDistance(referenceLat, referenceLon, closest.lat, closest.lon);
+      for (let i = 1; i < radarPoints.length; i++) {
+        const d = getDistance(referenceLat, referenceLon, radarPoints[i].lat, radarPoints[i].lon);
+        if (d < minD) {
+          minD = d;
+          closest = radarPoints[i];
+        }
+      }
+      return { lat: closest.lat, lon: closest.lon, isRadarPinpoint: true };
+    }
+    return { lat: radarPoints[0].lat, lon: radarPoints[0].lon, isRadarPinpoint: true };
+  }
+
+  // 3. Fallback to geometric shoelace centroid of the warning polygon
+  if (geometryCoordinates) {
+    const polyCentroid = getGeometryCentroid(geometryCoordinates);
+    if (polyCentroid) {
+      return { lat: polyCentroid.lat, lon: polyCentroid.lon, isRadarPinpoint: false };
+    }
+  }
+
+  return null;
+}
+
 
 

@@ -100,6 +100,26 @@ export const initGoogleSheetsAuth = (
   });
 };
 
+const SYNCED_RECORD_IDS_KEY = 'daisy-synced-record-ids';
+
+function getSyncedRecordIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SYNCED_RECORD_IDS_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function markRecordIdSynced(recordId: string) {
+  try {
+    const set = getSyncedRecordIds();
+    set.add(recordId);
+    const arr = Array.from(set).slice(-300);
+    localStorage.setItem(SYNCED_RECORD_IDS_KEY, JSON.stringify(arr));
+  } catch {}
+}
+
 export const signInForGoogleSheets = async (): Promise<{
   user: User;
   accessToken: string;
@@ -116,12 +136,21 @@ export const signInForGoogleSheets = async (): Promise<{
     cachedAccessToken = credential.accessToken;
     const sheetInfo = await ensureDaisySpreadsheet(cachedAccessToken);
 
-    // Flush any locally queued correlation records to the newly created/connected Google Sheet
+    // Flush all locally queued correlation records (including past rotation detections) to the Google Sheet
     const existingRecords = getSavedCorrelationRecords();
+    const syncedIds = getSyncedRecordIds();
     if (sheetInfo && existingRecords.length > 0) {
-      const unsynced = existingRecords.slice(0, 10).reverse();
+      const unsynced = existingRecords.filter((r) => !syncedIds.has(r.recordId)).reverse();
       for (const rec of unsynced) {
-        await appendRecordToGoogleSheet(rec, cachedAccessToken, sheetInfo.spreadsheetId, sheetInfo.tabName);
+        const ok = await appendRecordToGoogleSheet(
+          rec,
+          cachedAccessToken,
+          sheetInfo.spreadsheetId,
+          sheetInfo.tabName
+        );
+        if (ok) {
+          markRecordIdSynced(rec.recordId);
+        }
       }
     }
 
@@ -448,6 +477,9 @@ export async function syncAnonymousStormTelemetry(params: {
         sheetInfo.spreadsheetId,
         sheetInfo.tabName
       );
+      if (syncedRemote) {
+        markRecordIdSynced(record.recordId);
+      }
     }
   }
 

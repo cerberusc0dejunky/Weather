@@ -843,7 +843,10 @@ export default function RadarMap({
       alerts.forEach((alert) => {
         if (!alert.keywords?.vector || !alert.geometry || !alert.geometry.coordinates) return;
 
-        const centroid = getGeometryCentroid(alert.geometry.coordinates);
+        const centroid =
+          alert.stormCoreLat !== undefined && alert.stormCoreLon !== undefined
+            ? { lat: alert.stormCoreLat, lon: alert.stormCoreLon }
+            : getGeometryCentroid(alert.geometry.coordinates);
         if (!centroid) return;
 
         const [dir, speedStr, unit] = alert.keywords.vector;
@@ -1068,7 +1071,10 @@ export default function RadarMap({
       threatSource.forEach((alert) => {
         if (alert.threatLevel === 'High' || alert.threatLevel === 'Extreme') {
           if (!alert.geometry || !alert.geometry.coordinates) return;
-          const centroid = getGeometryCentroid(alert.geometry.coordinates);
+          const centroid =
+            alert.stormCoreLat !== undefined && alert.stormCoreLon !== undefined
+              ? { lat: alert.stormCoreLat, lon: alert.stormCoreLon }
+              : getGeometryCentroid(alert.geometry.coordinates);
           if (!centroid) return;
 
           const isExtreme = alert.threatLevel === 'Extreme';
