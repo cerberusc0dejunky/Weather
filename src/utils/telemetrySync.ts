@@ -120,36 +120,53 @@ function markRecordIdSynced(recordId: string) {
   } catch {}
 }
 
-export const signInForGoogleSheets = async (): Promise<{
+export interface SignInSheetsResult {
   user: User;
   accessToken: string;
   spreadsheetUrl?: string;
-} | null> => {
+  syncedCount?: number;
+  apiError?: string;
+  enableApiUrl?: string;
+}
+
+export const signInForGoogleSheets = async (): Promise<SignInSheetsResult | null> => {
   try {
     isSigningIn = true;
+    provider.setCustomParameters({ prompt: 'consent' });
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
-      throw new Error('Failed to obtain Google Sheets access token');
+      throw new Error('Failed to obtain Google Sheets access token from Google sign-in.');
     }
 
     cachedAccessToken = credential.accessToken;
     const sheetInfo = await ensureDaisySpreadsheet(cachedAccessToken);
 
-    // Flush all locally queued correlation records (including past rotation detections) to the Google Sheet
+    if (sheetInfo?.error) {
+      return {
+        user: result.user,
+        accessToken: cachedAccessToken,
+        apiError: sheetInfo.error,
+        enableApiUrl: sheetInfo.enableApiUrl,
+      };
+    }
+
+    // Batch-flush all locally queued correlation records in a single request
+    let syncedCount = 0;
     const existingRecords = getSavedCorrelationRecords();
     const syncedIds = getSyncedRecordIds();
-    if (sheetInfo && existingRecords.length > 0) {
+    if (sheetInfo && sheetInfo.spreadsheetId && existingRecords.length > 0) {
       const unsynced = existingRecords.filter((r) => !syncedIds.has(r.recordId)).reverse();
-      for (const rec of unsynced) {
-        const ok = await appendRecordToGoogleSheet(
-          rec,
+      if (unsynced.length > 0) {
+        const ok = await appendRecordsBatchToGoogleSheet(
+          unsynced,
           cachedAccessToken,
           sheetInfo.spreadsheetId,
           sheetInfo.tabName
         );
         if (ok) {
-          markRecordIdSynced(rec.recordId);
+          unsynced.forEach((rec) => markRecordIdSynced(rec.recordId));
+          syncedCount = unsynced.length;
         }
       }
     }
@@ -158,6 +175,7 @@ export const signInForGoogleSheets = async (): Promise<{
       user: result.user,
       accessToken: cachedAccessToken,
       spreadsheetUrl: sheetInfo?.spreadsheetUrl,
+      syncedCount,
     };
   } catch (error) {
     console.error('Google Sheets sign-in error:', error);
@@ -183,7 +201,13 @@ export const getSavedSpreadsheetUrl = (): string | null => {
  */
 export async function ensureDaisySpreadsheet(
   accessToken: string
-): Promise<{ spreadsheetId: string; tabName: string; spreadsheetUrl: string } | null> {
+): Promise<{
+  spreadsheetId: string;
+  tabName: string;
+  spreadsheetUrl: string;
+  error?: string;
+  enableApiUrl?: string;
+} | null> {
   if (!accessToken) return null;
   if (spreadsheetCreationPromise) return spreadsheetCreationPromise;
 
@@ -196,7 +220,7 @@ export async function ensureDaisySpreadsheet(
         });
         if (checkRes.ok) {
           const meta = await checkRes.json();
-          const firstTab = meta.sheets?.[0]?.properties?.title || localStorage.getItem(SPREADSHEET_TAB_KEY) || 'Telemetry';
+          const firstTab = meta.sheets?.[0]?.properties?.title || localStorage.getItem(SPREADSHEET_TAB_KEY) || 'StormCorrelationTelemetry';
           const url = meta.spreadsheetUrl || localStorage.getItem(SPREADSHEET_URL_KEY) || `https://docs.google.com/spreadsheets/d/${existingId}`;
           localStorage.setItem(SPREADSHEET_TAB_KEY, firstTab);
           localStorage.setItem(SPREADSHEET_URL_KEY, url);
@@ -229,8 +253,27 @@ export async function ensureDaisySpreadsheet(
       });
 
       if (!createRes.ok) {
-        console.warn('Failed to create Google Sheet:', await createRes.text());
-        return null;
+        const errText = await createRes.text();
+        console.warn('Failed to create Google Sheet:', errText);
+        let errMsg = `Google Sheets API Error (${createRes.status})`;
+        let enableUrl: string | undefined = undefined;
+        try {
+          const errJson = JSON.parse(errText);
+          if (errJson?.error?.message) {
+            errMsg = errJson.error.message;
+            const urlMatch = errMsg.match(/https:\/\/console\.developers\.google\.com\/apis\/api\/sheets\.googleapis\.com\/overview\?project=\d+/);
+            if (urlMatch) {
+              enableUrl = urlMatch[0];
+            }
+          }
+        } catch {}
+        return {
+          spreadsheetId: '',
+          tabName: '',
+          spreadsheetUrl: '',
+          error: errMsg,
+          enableApiUrl: enableUrl,
+        };
       }
 
       const created = await createRes.json();
@@ -259,9 +302,14 @@ export async function ensureDaisySpreadsheet(
       );
 
       return { spreadsheetId, tabName, spreadsheetUrl };
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Error ensuring Google Sheet:', err);
-      return null;
+      return {
+        spreadsheetId: '',
+        tabName: '',
+        spreadsheetUrl: '',
+        error: err?.message || 'Network error contacting Google Sheets API',
+      };
     } finally {
       spreadsheetCreationPromise = null;
     }
@@ -270,17 +318,19 @@ export async function ensureDaisySpreadsheet(
   return spreadsheetCreationPromise;
 }
 
-async function appendRecordToGoogleSheet(
-  record: CorrelationMetricRecord,
+async function appendRecordsBatchToGoogleSheet(
+  records: CorrelationMetricRecord[],
   accessToken: string,
   spreadsheetId: string,
   tabName: string
 ): Promise<boolean> {
   try {
-    const rowValues = CORRELATION_HEADERS.map((key) => {
-      const val = record[key];
-      return val === null || val === undefined ? '' : val;
-    });
+    const rows = records.map((record) =>
+      CORRELATION_HEADERS.map((key) => {
+        const val = record[key];
+        return val === null || val === undefined ? '' : val;
+      })
+    );
 
     const res = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(tabName)}!A1:append?valueInputOption=USER_ENTERED`,
@@ -291,7 +341,7 @@ async function appendRecordToGoogleSheet(
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          values: [rowValues],
+          values: rows,
         }),
       }
     );
@@ -301,6 +351,15 @@ async function appendRecordToGoogleSheet(
   }
 }
 
+async function appendRecordToGoogleSheet(
+  record: CorrelationMetricRecord,
+  accessToken: string,
+  spreadsheetId: string,
+  tabName: string
+): Promise<boolean> {
+  return appendRecordsBatchToGoogleSheet([record], accessToken, spreadsheetId, tabName);
+}
+
 export function getSavedCorrelationRecords(): CorrelationMetricRecord[] {
   try {
     const raw = localStorage.getItem(CORRELATION_STORAGE_KEY);
@@ -308,6 +367,37 @@ export function getSavedCorrelationRecords(): CorrelationMetricRecord[] {
   } catch {
     return [];
   }
+}
+
+export function exportCorrelationRecordsCsv(): boolean {
+  const records = getSavedCorrelationRecords();
+  if (records.length === 0) return false;
+
+  const escapeCsvCell = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    const str = String(val);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const headerLine = CORRELATION_HEADERS.join(',');
+  const dataLines = [...records]
+    .reverse()
+    .map((rec) => CORRELATION_HEADERS.map((k) => escapeCsvCell(rec[k])).join(','));
+
+  const csvContent = [headerLine, ...dataLines].join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `DAISY_Storm_Rotation_Log_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return true;
 }
 
 function saveCorrelationRecordLocally(record: CorrelationMetricRecord): CorrelationMetricRecord[] {
