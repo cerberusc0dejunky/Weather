@@ -1,4 +1,4 @@
-const CACHE_NAME = 'daisy-cache-v12';
+const CACHE_NAME = 'daisy-cache-v14';
 const OFFLINE_FALLBACK_URL = './index.html';
 
 const PRECACHE_ASSETS = [
@@ -32,6 +32,41 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Handle background warning notification dispatches from client
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
+    const { title, options } = event.data;
+    if (self.registration && self.registration.showNotification) {
+      event.waitUntil(
+        self.registration.showNotification(title, {
+          icon: '/icon-512.jpg',
+          badge: '/icon-512.jpg',
+          vibrate: [250, 120, 250, 120, 400],
+          requireInteraction: true,
+          ...options,
+        })
+      );
+    }
+  }
+});
+
+// Focus or open the DAISY app window when user taps a background weather alert notification
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow('/');
+      }
+    })
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
@@ -51,9 +86,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // EXCLUDE live weather, radar tile, spotter, and geocoding services to ensure up-to-the-second updates!
+  // EXCLUDE live weather, radar tile, SPC feeds, and geocoding services to ensure up-to-the-second updates!
   if (
     url.hostname.includes('weather.gov') ||
+    url.hostname.includes('spc.noaa.gov') ||
     url.hostname.includes('openstreetmap.org') ||
     url.hostname.includes('mesonet.agron.iastate.edu') ||
     url.hostname.includes('script.google.com') ||

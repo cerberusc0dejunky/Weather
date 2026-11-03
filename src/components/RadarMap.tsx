@@ -1230,8 +1230,13 @@ export default function RadarMap({
             .addTo(map)
             .bindPopup(`<div class="text-slate-950 font-sans p-1">
               <div class="font-black text-xs uppercase text-amber-600">SPC Mesoscale Discussion #${md.number}</div>
+              <p class="text-[10px] uppercase font-bold text-slate-600 mt-0.5">${md.concerning}</p>
               <p class="text-[10px] uppercase font-bold text-slate-500 mt-1">Probability of Watch: ${md.probability}%</p>
               <p class="text-[10px] mt-1 text-slate-700 leading-tight"><b>Areas:</b> ${md.areasAffected}</p>
+              ${md.watchBox ? `<p class="text-[9px] font-mono mt-1 text-slate-600"><b>Watch Corridor:</b> LAT ${md.watchBox.minLat.toFixed(2)}°–${md.watchBox.maxLat.toFixed(2)}°N, LON ${md.watchBox.minLon.toFixed(2)}°–${md.watchBox.maxLon.toFixed(2)}°W</p>` : ''}
+              ${md.peakTornadoIntensity ? `<p class="text-[9px] font-mono font-bold text-rose-600 mt-0.5">Peak Tornado: ${md.peakTornadoIntensity}</p>` : ''}
+              ${md.peakWindGust ? `<p class="text-[9px] font-mono font-bold text-cyan-700 mt-0.5">Peak Wind: ${md.peakWindGust}</p>` : ''}
+              ${md.peakHailSize ? `<p class="text-[9px] font-mono font-bold text-amber-700 mt-0.5">Peak Hail: ${md.peakHailSize}</p>` : ''}
             </div>`);
 
           polygonLayersRef.current.push(mcdLayer);

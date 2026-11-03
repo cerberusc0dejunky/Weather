@@ -9,7 +9,7 @@ import {
   Tooltip,
 } from 'recharts';
 import SafeResponsiveContainer from './components/SafeResponsiveContainer';
-import { SystemSettings, NWSAlert, LocationAsset, TelemetryConditions, MesoscaleDiscussion, RotationPin, NetworkRequestLog } from './types';
+import { SystemSettings, NWSAlert, LocationAsset, TelemetryConditions, MesoscaleDiscussion, RotationPin, NetworkRequestLog, CorrelationMetricRecord } from './types';
 import {
   getDistance,
   getBearing,
@@ -23,6 +23,13 @@ import {
   getParsedPolygonMinDistance,
   parseStormTrajectory,
 } from './utils/geoUtils';
+import {
+  syncAnonymousStormTelemetry,
+  initGoogleSheetsAuth,
+  signInForGoogleSheets,
+  signOutGoogleSheets,
+  getSavedSpreadsheetUrl,
+} from './utils/telemetrySync';
 import ThreatCard from './components/ThreatCard';
 import WindGauge from './components/WindGauge';
 import type { ResolvedAlert } from './components/AlertHistory';
@@ -157,33 +164,27 @@ class SirenProcessor {
 const siren = new SirenProcessor();
 
 function parseMesoscaleDiscussion(id: string, issuanceTime: string, text: string): MesoscaleDiscussion {
-  const numberMatch = text.match(/Mesoscale Discussion\s+(\d+)/i);
+  const numberMatch = text.match(/Mesoscale Discussion\s+(\d+)/i) || text.match(/MCD\s*#?\s*(\d+)/i);
   const number = numberMatch ? numberMatch[1] : 'Unknown';
-  
-  const areasMatch = text.match(/Areas affected\.\.\.(.+)/i);
+
+  const areasMatch = text.match(/Areas affected\.\.\.([\s\S]+?)(?=\n\s*\n|Concerning\.\.\.|Valid\s+)/i);
   let areasAffected = 'Unspecified Region';
   if (areasMatch) {
-    const endIdx = areasMatch[1].indexOf('\n');
-    areasAffected = endIdx !== -1 ? areasMatch[1].substring(0, endIdx).trim() : areasMatch[1].trim();
+    areasAffected = areasMatch[1].replace(/\r?\n\s*/g, ' ').trim();
   }
-  
-  const concerningMatch = text.match(/Concerning\.\.\.(.+)/i);
+
+  const concerningMatch = text.match(/Concerning\.\.\.([\s\S]+?)(?=\n\s*\n|Valid\s+|Probability of Watch)/i);
   let concerning = 'Severe potential...Watch possible';
   if (concerningMatch) {
-    const endIdx = concerningMatch[1].indexOf('\n');
-    concerning = endIdx !== -1 ? concerningMatch[1].substring(0, endIdx).trim() : concerningMatch[1].trim();
+    concerning = concerningMatch[1].replace(/\r?\n\s*/g, ' ').trim();
   }
-  
-  const validMatch = text.match(/Valid\s+(.+)/i);
-  let validTime = 'Unknown';
-  if (validMatch) {
-    const endIdx = validMatch[1].indexOf('\n');
-    validTime = endIdx !== -1 ? validMatch[1].substring(0, endIdx).trim() : validMatch[1].trim();
-  }
-  
+
+  const validMatch = text.match(/Valid\s+([^\r\n]+)/i);
+  const validTime = validMatch ? validMatch[1].trim() : 'Unknown';
+
   const probMatch = text.match(/Probability of Watch Issuance\.\.\.(\d+)\s*percent/i);
   const probability = probMatch ? parseInt(probMatch[1], 10) : 0;
-  
+
   let summary = '';
   const summaryMatch = text.match(/SUMMARY\.\.\.([\s\S]+?)(?=\n\s*\n|\n\s*DISCUSSION)/i);
   if (summaryMatch) {
@@ -191,9 +192,45 @@ function parseMesoscaleDiscussion(id: string, issuanceTime: string, text: string
   } else {
     summary = `${concerning}. Affecting ${areasAffected}.`;
   }
-  
+
+  // Extract SPC peak intensity metrics & targeted WFOs when present
+  const peakTornadoMatch = text.match(/MOST PROBABLE PEAK TORNADO INTENSITY\.\.\.([^\r\n]+)/i);
+  const peakTornadoIntensity = peakTornadoMatch ? peakTornadoMatch[1].trim() : undefined;
+
+  const peakWindMatch = text.match(/MOST PROBABLE PEAK WIND GUST\.\.\.([^\r\n]+)/i);
+  const peakWindGust = peakWindMatch ? peakWindMatch[1].trim() : undefined;
+
+  const peakHailMatch = text.match(/MOST PROBABLE PEAK HAIL SIZE\.\.\.([^\r\n]+)/i);
+  const peakHailSize = peakHailMatch ? peakHailMatch[1].trim() : undefined;
+
+  const wfoMatch = text.match(/ATTN\.\.\.WFO\.\.\.([A-Z.\s]+?)(?=\n\s*\n|LAT\.\.\.LON)/i);
+  const wfoList = wfoMatch
+    ? wfoMatch[1]
+        .split('.')
+        .map((w) => w.trim())
+        .filter((w) => /^[A-Z]{3}$/.test(w))
+    : undefined;
+
   const coordinates = parseSPCLatLon(text);
-  
+
+  let centroid: { lat: number; lon: number } | null = null;
+  let watchBox: { minLat: number; maxLat: number; minLon: number; maxLon: number } | null = null;
+
+  if (coordinates.length > 0) {
+    const lats = coordinates.map((c) => c.lat);
+    const lons = coordinates.map((c) => c.lon);
+    centroid = {
+      lat: Number((lats.reduce((a, b) => a + b, 0) / lats.length).toFixed(4)),
+      lon: Number((lons.reduce((a, b) => a + b, 0) / lons.length).toFixed(4)),
+    };
+    watchBox = {
+      minLat: Number(Math.min(...lats).toFixed(4)),
+      maxLat: Number(Math.max(...lats).toFixed(4)),
+      minLon: Number(Math.min(...lons).toFixed(4)),
+      maxLon: Number(Math.max(...lons).toFixed(4)),
+    };
+  }
+
   return {
     id,
     number,
@@ -205,6 +242,12 @@ function parseMesoscaleDiscussion(id: string, issuanceTime: string, text: string
     summary,
     text,
     coordinates,
+    centroid,
+    watchBox,
+    wfoList,
+    peakTornadoIntensity,
+    peakWindGust,
+    peakHailSize,
     isIntersecting: false,
     minDist: 999,
   };
@@ -305,8 +348,10 @@ function translateAlertsToRotationPins(activeAlerts: NWSAlert[]): RotationPin[] 
 }
 
 function App() {
-  // Main State Configuration
-  const [armed, setArmed] = useState<boolean>(false);
+  // Main State Configuration (Persisted locally on user's device only)
+  const [armed, setArmed] = useState<boolean>(() => {
+    return localStorage.getItem('daisy-armed') === 'true';
+  });
   const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
   const [isActivating, setIsActivating] = useState<boolean>(false);
   const [showTermsModal, setShowTermsModal] = useState<boolean>(() => {
@@ -345,6 +390,9 @@ function App() {
 
   const [alerts, setAlerts] = useState<NWSAlert[]>([]);
   const [showHeadedTowardsOnly, setShowHeadedTowardsOnly] = useState<boolean>(false);
+  const [showMesoscaleCards, setShowMesoscaleCards] = useState<boolean>(false);
+  const [stormCoreAddresses, setStormCoreAddresses] = useState<Record<string, string>>({});
+  const stormCoreCacheRef = useRef<Record<string, string>>({});
   const [alertHistory, setAlertHistory] = useState<ResolvedAlert[]>(() => {
     const raw = localStorage.getItem('daisy-alert-history');
     return raw ? JSON.parse(raw) : [];
@@ -396,24 +444,129 @@ function App() {
   const [pressureHistory, setPressureHistory] = useState<{ time: string; pressure: number }[]>([]);
   const [capeHistory, setCapeHistory] = useState<{ time: string; timestamp: number; cape: number; isForecast?: boolean }[]>([]);
 
-  const [currentLat, setCurrentLat] = useState<number>(29.5958);
-  const [currentLon, setCurrentLon] = useState<number>(-90.7195);
+  const [currentLat, setCurrentLat] = useState<number>(() => {
+    const saved = localStorage.getItem('daisy-user-lat');
+    const parsed = saved ? parseFloat(saved) : NaN;
+    return !isNaN(parsed) ? parsed : 29.5958;
+  });
+  const [currentLon, setCurrentLon] = useState<number>(() => {
+    const saved = localStorage.getItem('daisy-user-lon');
+    const parsed = saved ? parseFloat(saved) : NaN;
+    return !isNaN(parsed) ? parsed : -90.7195;
+  });
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searching, setSearching] = useState<boolean>(false);
   
   const [syncStatus, setSyncStatus] = useState<string>('Disarmed');
   const [connectionOnline, setConnectionOnline] = useState<boolean>(navigator.onLine);
   
-  // Settings
-  const [settings, setSettings] = useState<SystemSettings>({
-    audio: true,
-    vibrate: true,
-    flash: true,
-    monitorRadius: 25,
-    telemetryDebug: false,
-    highContrast: false,
-    browserAlerts: false,
+  // Settings persisted in localStorage
+  const [settings, setSettings] = useState<SystemSettings>(() => {
+    try {
+      const saved = localStorage.getItem('daisy-settings');
+      if (saved) {
+        return {
+          audio: true,
+          vibrate: true,
+          flash: true,
+          monitorRadius: 25,
+          telemetryDebug: false,
+          highContrast: false,
+          browserAlerts: false,
+          ...JSON.parse(saved),
+        };
+      }
+    } catch {}
+    return {
+      audio: true,
+      vibrate: true,
+      flash: true,
+      monitorRadius: 25,
+      telemetryDebug: false,
+      highContrast: false,
+      browserAlerts: false,
+    };
   });
+
+  // Persist user coordinates, armed state, and settings strictly in localStorage
+  useEffect(() => {
+    localStorage.setItem('daisy-user-lat', String(currentLat));
+    localStorage.setItem('daisy-user-lon', String(currentLon));
+  }, [currentLat, currentLon]);
+
+  useEffect(() => {
+    localStorage.setItem('daisy-armed', String(armed));
+  }, [armed]);
+
+  useEffect(() => {
+    localStorage.setItem('daisy-settings', JSON.stringify(settings));
+  }, [settings]);
+
+  // Request Screen Wake Lock when armed on supported mobile/desktop devices
+  useEffect(() => {
+    if (!armed || !('wakeLock' in navigator)) return;
+    let wakeLockSentinel: any = null;
+    const requestWakeLock = async () => {
+      try {
+        wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
+      } catch {}
+    };
+    requestWakeLock();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && armed) {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockSentinel) {
+        wakeLockSentinel.release().catch(() => {});
+      }
+    };
+  }, [armed]);
+
+  // Google Sheets OAuth state for automatic background spreadsheet creation & logging
+  const [sheetsConnected, setSheetsConnected] = useState<boolean>(false);
+  const [sheetsConnecting, setSheetsConnecting] = useState<boolean>(false);
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(() => getSavedSpreadsheetUrl());
+  const syncedRotationIdsRef = useRef<Set<string>>(new Set());
+  const syncedMcdIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const unsubscribe = initGoogleSheetsAuth(
+      () => {
+        setSheetsConnected(true);
+        setSpreadsheetUrl(getSavedSpreadsheetUrl());
+      },
+      () => {
+        setSheetsConnected(false);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const handleConnectGoogleSheets = async () => {
+    if (sheetsConnecting) return;
+    setSheetsConnecting(true);
+    try {
+      const res = await signInForGoogleSheets();
+      if (res) {
+        setSheetsConnected(true);
+        if (res.spreadsheetUrl) {
+          setSpreadsheetUrl(res.spreadsheetUrl);
+        }
+        triggerToast(
+          'Google Sheet created and connected! Rotation & Mesoscale data will log automatically in the background.',
+          'success'
+        );
+      }
+    } catch (err) {
+      triggerToast('Google Sheets sign-in was cancelled or failed.', 'error');
+    } finally {
+      setSheetsConnecting(false);
+    }
+  };
 
   // Custom user-managed API keys
   const [customPointKey, setCustomPointKey] = useState<string>(() => localStorage.getItem('daisy-windy-point-key') || '');
@@ -431,43 +584,90 @@ function App() {
   } | null>(null);
 
 
-  // Keep track of notified warnings to avoid spamming the user
+  // Keep track of notified warnings & MCDs to avoid spamming the user
   const notifiedAlertsRef = useRef<Set<string>>(new Set());
 
-  // Browser background notifications trigger
+  const dispatchBackgroundNotification = (title: string, body: string, tag: string) => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const options: any = {
+      body,
+      icon: '/icon-512.jpg',
+      badge: '/icon-512.jpg',
+      tag,
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [300, 150, 300, 150, 500],
+    };
+
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'SHOW_NOTIFICATION',
+        title,
+        options,
+      });
+    } else if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready
+        .then((reg) => reg.showNotification(title, options))
+        .catch(() => {
+          try {
+            new Notification(title, options);
+          } catch {}
+        });
+    } else {
+      try {
+        new Notification(title, options);
+      } catch {}
+    }
+  };
+
+  // Browser & Service Worker background notifications trigger (warns when user isn't actively looking at the app)
   useEffect(() => {
     if (!settings.browserAlerts) return;
 
     alerts.forEach((alert) => {
       const isWarning = alert.event.toUpperCase().includes('WARNING');
       const isWithinRadius = alert.isDirectHit || alert.minDist <= settings.monitorRadius;
-      
-      if (isWarning && isWithinRadius && !notifiedAlertsRef.current.has(alert.id)) {
+      const hasRotationKeyword =
+        alert.keywords.rotation || alert.keywords.funnel || alert.keywords.observed || alert.keywords.emergency;
+
+      if ((isWarning || hasRotationKeyword) && isWithinRadius && !notifiedAlertsRef.current.has(alert.id)) {
         notifiedAlertsRef.current.add(alert.id);
-        
-        // Trigger browser notification only if the app is hidden in the background
-        if (document.visibilityState === 'hidden' && Notification.permission === 'granted') {
-          try {
-            new Notification(`🚨 CRITICAL DAISY WARNING: ${alert.event}`, {
-              body: `${alert.snippet || alert.event} - detected within ${alert.minDist.toFixed(1)} miles of your location.`,
-              icon: '/icon-512.jpg',
-              tag: alert.id,
-            });
-          } catch (err) {
-            console.error('[Browser Notifications] Error triggering background alert:', err);
-          }
+
+        if (document.visibilityState === 'hidden') {
+          dispatchBackgroundNotification(
+            `CRITICAL DAISY WARNING: ${alert.event}`,
+            `${alert.snippet || alert.event} — detected ${alert.isDirectHit ? 'directly intersecting your location' : `within ${alert.minDist.toFixed(1)} miles`}.`,
+            alert.id
+          );
+        }
+      }
+    });
+
+    discussions.forEach((md) => {
+      const mdKey = `mcd-${md.id}`;
+      if ((md.isIntersecting || md.minDist <= settings.monitorRadius) && md.probability >= 40 && !notifiedAlertsRef.current.has(mdKey)) {
+        notifiedAlertsRef.current.add(mdKey);
+        if (document.visibilityState === 'hidden') {
+          dispatchBackgroundNotification(
+            `SPC Mesoscale Discussion #${md.number} (${md.probability}% Watch Prob)`,
+            `${md.concerning} — Affecting ${md.areasAffected}.`,
+            mdKey
+          );
         }
       }
     });
 
     // Housekeeping: remove old, inactive alerts from our notified set
-    const activeIds = new Set(alerts.map(a => a.id));
+    const activeIds = new Set([
+      ...alerts.map((a) => a.id),
+      ...discussions.map((d) => `mcd-${d.id}`),
+    ]);
     for (const id of notifiedAlertsRef.current) {
       if (!activeIds.has(id)) {
         notifiedAlertsRef.current.delete(id);
       }
     }
-  }, [alerts, settings.browserAlerts, settings.monitorRadius]);
+  }, [alerts, discussions, settings.browserAlerts, settings.monitorRadius]);
 
   const logNetworkRequest = (log: Omit<NetworkRequestLog, 'id' | 'timestamp'>) => {
     const newLog: NetworkRequestLog = {
@@ -829,6 +1029,79 @@ function App() {
   const rawNwsFeaturesRef = useRef<any[]>([]);
   const pointDirectHitIdsRef = useRef<Set<string>>(new Set());
 
+  // Silent Background Correlation Sync:
+  // 1) Immediately capture & sync all storm, ASOS, CAPE, and MCD metrics whenever a new RotationPin is detected.
+  // 2) Capture & sync SPC Mesoscale Discussion (LAT/LON watch corridor + intensity metrics) when newly issued or sampled periodically.
+  // Strict Privacy: Zero user GPS coordinates or personal location names are ever included.
+  useEffect(() => {
+    if (!armed) return;
+
+    rotationPins.forEach((pin) => {
+      if (!syncedRotationIdsRef.current.has(pin.id)) {
+        syncedRotationIdsRef.current.add(pin.id);
+        const matchedAlert = alerts.find((a) => a.id === pin.alertId) || null;
+        syncAnonymousStormTelemetry({
+          triggerType:
+            pin.pinType === 'vortex' || pin.pinType === 'radar_indicated'
+              ? 'TORNADO_WARNING_ACTIVE'
+              : 'ROTATION_DETECTED',
+          pin,
+          alert: matchedAlert,
+          discussions,
+          telemetry,
+          windyTelemetry: windyPointTelemetry,
+          forecastTrend,
+        }).then(() => {
+          setSpreadsheetUrl(getSavedSpreadsheetUrl());
+        });
+      }
+    });
+  }, [rotationPins, armed, alerts, discussions, telemetry, windyPointTelemetry, forecastTrend, sheetsConnected]);
+
+  useEffect(() => {
+    if (!armed || discussions.length === 0) return;
+
+    // Log newly discovered Mesoscale Discussions so we capture their LAT...LON watch corridors for later tornado correlation
+    discussions.forEach((md) => {
+      const mcdSyncKey = `mcd-${md.number}-${md.issuanceTime}`;
+      if (!syncedMcdIdsRef.current.has(mcdSyncKey) && md.coordinates.length > 0) {
+        syncedMcdIdsRef.current.add(mcdSyncKey);
+        syncAnonymousStormTelemetry({
+          triggerType: 'MESOSCALE_CORRELATION_SAMPLE',
+          pin: rotationPins[0] || null,
+          alert: alerts[0] || null,
+          discussions,
+          targetMcd: md,
+          telemetry,
+          windyTelemetry: windyPointTelemetry,
+          forecastTrend,
+        }).then(() => {
+          setSpreadsheetUrl(getSavedSpreadsheetUrl());
+        });
+      }
+    });
+
+    // Periodic 15-minute background sample while Mesoscale Discussions or Rotation Pins are active
+    const sampleInterval = setInterval(() => {
+      if (discussions.length > 0 || rotationPins.length > 0) {
+        syncAnonymousStormTelemetry({
+          triggerType: rotationPins.length > 0 ? 'ROTATION_DETECTED' : 'MESOSCALE_CORRELATION_SAMPLE',
+          pin: rotationPins[0] || null,
+          alert: alerts[0] || null,
+          discussions,
+          targetMcd: discussions[0] || null,
+          telemetry,
+          windyTelemetry: windyPointTelemetry,
+          forecastTrend,
+        }).then(() => {
+          setSpreadsheetUrl(getSavedSpreadsheetUrl());
+        });
+      }
+    }, 15 * 60 * 1000);
+
+    return () => clearInterval(sampleInterval);
+  }, [armed, discussions, rotationPins, alerts, telemetry, windyPointTelemetry, forecastTrend, sheetsConnected]);
+
   // Core NWS Alert Acquisition Engine (Layer 1 The Alarm)
   const fetchNationalAlerts = async () => {
     setSyncStatus('SYNCING...');
@@ -1181,7 +1454,8 @@ function App() {
         );
       }
 
-      // Snip detailed hazard line
+      // Snip detailed hazard line, radar location headline, impacted locations, and wind/hail tags from raw NWS text
+      const rawDesc = props.description || '';
       let snippet = '';
       const lines = desc.split('\n');
       const matchedLine = lines.find((l: string) => l.includes('HAZARD...') || l.includes('IMPACT...')) || '';
@@ -1189,72 +1463,151 @@ function App() {
         snippet = matchedLine.replace(/HAZARD\.\.\.|IMPACT\.\.\./g, '').trim();
       }
 
-      // 2. Geospatial Proximity calculations
+      // Extract NWS Doppler pinpoint sentence ("At 714 PM CDT, a severe thunderstorm... was located...")
+      let radarLocationHeadline: string | undefined;
+      const radarLocMatch =
+        rawDesc.match(/\*\s*(At\s+\d{1,4}\s+[AP]M\s+[A-Z]{2,4},?[\s\S]+?)(?=\n\s*\n|\n\s*\*|HAZARD\.\.\.)/i) ||
+        rawDesc.match(/(At\s+\d{1,4}\s+[AP]M\s+[A-Z]{2,4},?\s+a\s+[\s\S]+?(?:mph\.|stationary\.))/i);
+      if (radarLocMatch) {
+        radarLocationHeadline = radarLocMatch[1].replace(/\r?\n\s*/g, ' ').trim();
+      }
+
+      // Extract NWS "Locations impacted include..." and highway mile markers
+      let impactedLocations: string | undefined;
+      const impactedMatch = rawDesc.match(
+        /(?:Locations impacted include|This includes)[\s\S]+?(?=\n\s*\n|PRECAUTIONARY\/PREPAREDNESS|&&|LAT\.\.\.LON)/i
+      );
+      if (impactedMatch) {
+        impactedLocations = impactedMatch[0]
+          .replace(/Locations impacted include\.{0,3}/i, '')
+          .replace(/\r?\n\s*/g, ' ')
+          .trim();
+      }
+
+      // Extract bottom NWS parameters (MAX WIND GUST, MAX HAIL SIZE, TORNADO DAMAGE THREAT)
+      const tagParts: string[] = [];
+      const windTagMatch = rawDesc.match(/(?:MAX\s+WIND\s+GUST|WIND\s+GUSTS?)\.\.\.([^\r\n]+)/i);
+      if (windTagMatch) tagParts.push(`MAX WIND: ${windTagMatch[1].trim()}`);
+      const hailTagMatch = rawDesc.match(/(?:MAX\s+HAIL\s+SIZE|HAIL\s+SIZE)\.\.\.([^\r\n]+)/i);
+      if (hailTagMatch) tagParts.push(`MAX HAIL: ${hailTagMatch[1].trim()}`);
+      const torTagMatch = rawDesc.match(/TORNADO\.\.\.([^\r\n]+)/i);
+      if (torTagMatch) tagParts.push(`TORNADO: ${torTagMatch[1].trim()}`);
+      const maxWindHailTag = tagParts.length > 0 ? tagParts.join(' • ') : undefined;
+
+      const bearingToCompass16 = (deg: number): string => {
+        const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+        const normalized = ((deg % 360) + 360) % 360;
+        return dirs[Math.round(normalized / 22.5) % 16];
+      };
+
+      // 2. Geospatial Proximity calculations (preserving both polygon edge distance AND storm core centroid distance/bearing)
       let shortestDistance = 999;
+      let centroidDist: number | undefined = undefined;
+      let centroidDir: string | undefined = undefined;
+      let edgeDir: string | undefined = undefined;
+      let closestAssetName: string | undefined = effectiveAssets[0]?.name;
       let matchedInZone = false;
       let isHeadingTowards = false;
       let calculatedEta: number | undefined = undefined;
 
       if (effectiveAssets.length > 0) {
-        // Geometric distance to polygon boundary (Change 1 Priority)
+        // Compute distance & direction to storm polygon centroid (core)
         if (feature.geometry && feature.geometry.coordinates) {
+          const polyCentroid = getGeometryCentroid(feature.geometry.coordinates);
+          if (polyCentroid) {
+            let minCoreDist = 9999;
+            effectiveAssets.forEach((a) => {
+              const d = getDistance(a.lat, a.lon, polyCentroid.lat, polyCentroid.lon);
+              if (d < minCoreDist) {
+                minCoreDist = d;
+                const b = getBearing(a.lat, a.lon, polyCentroid.lat, polyCentroid.lon);
+                centroidDist = d;
+                centroidDir = bearingToCompass16(b);
+                closestAssetName = a.name;
+              }
+            });
+          }
+
           let calculatedMin = 9999;
           let closestPt: [number, number] | null = null;
+          let closestAssetForEdge: LocationAsset = effectiveAssets[0];
           let insidePoly = false;
 
           const alertId = props.id || feature.id || '';
           effectiveAssets.forEach((a) => {
             const result = getMemoizedMinPolygonDistance(a.id, a.lat, a.lon, alertId, feature.geometry.coordinates);
-            if (result.isInside) insidePoly = true;
+            if (result.isInside) {
+              insidePoly = true;
+              closestAssetName = a.name;
+            }
             if (result.minDist < calculatedMin) {
               calculatedMin = result.minDist;
               closestPt = result.closestPt;
+              closestAssetForEdge = a;
             }
           });
+
+          if (closestPt && calculatedMin < 9999) {
+            const bEdge = getBearing(
+              closestAssetForEdge.lat,
+              closestAssetForEdge.lon,
+              closestPt[1],
+              closestPt[0]
+            );
+            edgeDir = bearingToCompass16(bEdge);
+          }
 
           if (insidePoly) {
             shortestDistance = 0;
             matchedInZone = true;
           } else if (closestPt && calculatedMin < 9999) {
             shortestDistance = calculatedMin;
+            closestAssetName = closestAssetForEdge.name;
+          }
 
-            // Trajectory projection supporting both cardinal words and degrees
-            if (vectorMatch) {
-              const normalizedDir = normalizeDirection(vectorMatch[0]);
-              let stormDir: number | undefined = undefined;
-              if (/^\d+$/.test(normalizedDir)) {
-                stormDir = parseInt(normalizedDir, 10) % 360;
-              } else {
-                stormDir = cardinalBearings[normalizedDir];
-              }
+          // Trajectory projection supporting both cardinal words and degrees (works both outside and inside polygon)
+          if (vectorMatch) {
+            const normalizedDir = normalizeDirection(vectorMatch[0]);
+            let stormDir: number | undefined = undefined;
+            if (/^\d+$/.test(normalizedDir)) {
+              stormDir = parseInt(normalizedDir, 10) % 360;
+            } else {
+              stormDir = cardinalBearings[normalizedDir];
+            }
 
-              if (stormDir !== undefined) {
+            if (stormDir !== undefined) {
+              const refPt = polyCentroid
+                ? ([polyCentroid.lon, polyCentroid.lat] as [number, number])
+                : closestPt;
+              if (refPt) {
                 isHeadingTowards = effectiveAssets.some((a) => {
-                  const bearingToAsset = getBearing(closestPt![1], closestPt![0], a.lat, a.lon);
+                  const bearingToAsset = getBearing(refPt[1], refPt[0], a.lat, a.lon);
                   const diff = Math.abs(stormDir! - bearingToAsset);
-                  return Math.min(diff, 360 - diff) < 45; // within 45 degrees tracking envelope
+                  return Math.min(diff, 360 - diff) < 45;
                 });
               }
+            }
 
-              if (isHeadingTowards) {
-                let speed = parseInt(vectorMatch[1], 10);
-                const unit = vectorMatch[2].toUpperCase();
-                if (unit.startsWith('KT') || unit.startsWith('KNOT')) {
-                  speed = Math.round(speed * 1.15); // convert knots to mph
-                }
-                if (speed > 0) {
-                  calculatedEta = Math.round((shortestDistance / speed) * 60);
-                }
+            if (isHeadingTowards || insidePoly) {
+              let speed = parseInt(vectorMatch[1], 10);
+              const unit = vectorMatch[2].toUpperCase();
+              if (unit.startsWith('KT') || unit.startsWith('KNOT')) {
+                speed = Math.round(speed * 1.15);
+              }
+              const targetDist = shortestDistance > 0 && shortestDistance < 999 ? shortestDistance : (centroidDist ?? 0);
+              if (speed > 0 && targetDist > 0) {
+                calculatedEta = Math.max(1, Math.round((targetDist / speed) * 60));
               }
             }
           }
         }
 
         // Zone Name & Exact Point Lookup Fallback (Trigger logic for County-based Watches & Warnings)
+        // Note: Do NOT overwrite shortestDistance to 0 if we already measured a real geometric polygon distance!
         const alertFeatureId = props.id || feature.id || '';
         if (alertFeatureId && pointDirectHitIdsRef.current.has(alertFeatureId)) {
           matchedInZone = true;
-          shortestDistance = 0;
+          if (shortestDistance === 999) shortestDistance = 0;
         }
         effectiveAssets.forEach((asset) => {
           const cleanedName = asset.name.toUpperCase().replace(/ COUNTY| PARISH/g, '');
@@ -1267,6 +1620,7 @@ function App() {
             nameTokens.some((token) => props.areaDesc.toUpperCase().includes(token))
           ) {
             matchedInZone = true;
+            closestAssetName = asset.name;
             if (shortestDistance === 999) shortestDistance = 0;
           }
         });
@@ -1315,8 +1669,10 @@ function App() {
         calculatedThreatLevel = 'Low';
       }
 
+      const finalId = props.id || feature.id || Math.random().toString();
+
       processedList.push({
-        id: props.id || Math.random().toString(),
+        id: finalId,
         event: eventName,
         areaDesc: props.areaDesc || 'Unknown Boundaries',
         description: props.description || '',
@@ -1325,6 +1681,14 @@ function App() {
         sent: props.sent || props.onset || props.issued || '',
         geometry: feature.geometry,
         minDist: shortestDistance,
+        centroidDist,
+        centroidDir,
+        edgeDir,
+        closestAssetName,
+        radarLocationHeadline,
+        impactedLocations,
+        maxWindHailTag,
+        stormCoreAddress: stormCoreCacheRef.current[finalId] || stormCoreAddresses[finalId],
         isDirectHit: matchedInZone,
         headedTowards: isHeadingTowards,
         etaMinutes: calculatedEta,
@@ -1397,6 +1761,55 @@ function App() {
     previousSignaturesRef.current = currentSignatures;
   };
 
+  // Free OpenStreetMap Nominatim reverse-geocoding for storm radar centroids on nearby warnings
+  useEffect(() => {
+    const candidates = alerts.filter(
+      (a) =>
+        !a.event.toUpperCase().includes('WATCH') &&
+        a.geometry?.coordinates &&
+        (a.isDirectHit || a.minDist <= 50 || (a.centroidDist !== undefined && a.centroidDist <= 50)) &&
+        !stormCoreCacheRef.current[a.id]
+    ).slice(0, 3);
+
+    if (candidates.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      for (const alert of candidates) {
+        if (cancelled) break;
+        const centroid = getGeometryCentroid(alert.geometry?.coordinates);
+        if (!centroid) continue;
+        stormCoreCacheRef.current[alert.id] = 'Resolving...';
+        try {
+          const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${centroid.lat.toFixed(4)}&lon=${centroid.lon.toFixed(4)}&zoom=16&addressdetails=1`;
+          const res = await fetch(url, {
+            headers: { 'User-Agent': 'DAISY-Emergency-System/1.0 (contact: cerberus@c0dejunky.com)' },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const addr = data.address || {};
+            const road = addr.road || addr.highway || addr.pedestrian || addr.suburb || addr.hamlet || '';
+            const locality = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
+            const state = addr.state || '';
+            const parts = [road ? `Near ${road}` : '', locality, state].filter(Boolean);
+            const formatted = parts.length > 0 ? parts.join(', ') : formatAddress(addr, `${centroid.lat.toFixed(3)}, ${centroid.lon.toFixed(3)}`);
+            stormCoreCacheRef.current[alert.id] = formatted;
+            if (!cancelled) {
+              setStormCoreAddresses((prev) => ({ ...prev, [alert.id]: formatted }));
+              setAlerts((prev) =>
+                prev.map((item) => (item.id === alert.id ? { ...item, stormCoreAddress: formatted } : item))
+              );
+            }
+          }
+        } catch {}
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [alerts]);
+
   // Re-evaluate active NWS features whenever monitored assets, monitorRadius, or current position changes
   useEffect(() => {
     if (rawNwsFeaturesRef.current.length > 0) {
@@ -1405,50 +1818,98 @@ function App() {
   }, [assets, settings.monitorRadius, currentLat, currentLon]);
 
   // Core SPC Mesoscale Discussions Acquisition Engine
+  // NWS publishes SPC Mesoscale Discussions under product type 'SWO' with wmoCollectiveId 'ACUS11' (SWOMCD),
+  // with fallback to the official NOAA SPC Mesoscale Discussion RSS XML stream.
   const fetchMesoscaleDiscussions = async () => {
+    const headers = {
+      'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)',
+    };
+    let apiDiscussions: MesoscaleDiscussion[] = [];
+
     try {
-      const res = await fetch('https://api.weather.gov/products/types/MCD', {
-        headers: {
-          'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
-        }
+      const res = await fetch('https://api.weather.gov/products/types/SWO', { headers });
+
+      logNetworkRequest({
+        service: 'NWS',
+        url: 'https://api.weather.gov/products/types/SWO (ACUS11 SPC MCD)',
+        method: 'GET',
+        status: res.status,
+        statusText: res.ok ? 'OK' : 'Error',
+        headers,
       });
-      let apiDiscussions: MesoscaleDiscussion[] = [];
 
       if (res.ok) {
         const data = await res.json();
         const graph = data['@graph'] || [];
 
-        // Sort descending and take top 5 to load quickly
-        const sortedGraph = [...graph].sort((a: any, b: any) =>
-          new Date(b.issuanceTime).getTime() - new Date(a.issuanceTime).getTime()
+        // Filter specifically for SPC Mesoscale Discussions (WMO header ACUS11 / SWOMCD)
+        const mcdEntries = graph.filter((item: any) => item.wmoCollectiveId === 'ACUS11');
+        const sortedGraph = [...mcdEntries].sort(
+          (a: any, b: any) => new Date(b.issuanceTime).getTime() - new Date(a.issuanceTime).getTime()
         );
-        const topProducts = sortedGraph.slice(0, 5);
+        // Take latest 6 discussions issued within the last 18 hours
+        const cutoffMs = Date.now() - 18 * 3600 * 1000;
+        const recentProducts = sortedGraph
+          .filter((item: any) => new Date(item.issuanceTime).getTime() >= cutoffMs)
+          .slice(0, 6);
+        const topProducts = recentProducts.length > 0 ? recentProducts : sortedGraph.slice(0, 4);
 
         const fetched = await Promise.all(
           topProducts.map(async (prod: any) => {
             try {
-              const prodRes = await fetch(`https://api.weather.gov/products/${prod.id}`, {
-                headers: {
-                  'User-Agent': '(DAISY Storm Tracker App, cerberus@c0dejunky.com)'
-                }
-              });
+              const prodRes = await fetch(`https://api.weather.gov/products/${prod.id}`, { headers });
               if (!prodRes.ok) return null;
               const fullProd = await prodRes.json();
               if (!fullProd.productText) return null;
 
               return parseMesoscaleDiscussion(prod.id, prod.issuanceTime, fullProd.productText);
-            } catch (e) {
+            } catch {
               return null;
             }
           })
         );
-        apiDiscussions = fetched.filter((x): x is MesoscaleDiscussion => x !== null);
-      }
 
-      setRawApiDiscussions(apiDiscussions);
+        // Deduplicate by MCD number (keeping newest issuance)
+        const seenNumbers = new Set<string>();
+        apiDiscussions = fetched.filter((x): x is MesoscaleDiscussion => {
+          if (!x) return false;
+          if (seenNumbers.has(x.number)) return false;
+          seenNumbers.add(x.number);
+          return true;
+        });
+      }
     } catch (err) {
-      console.warn('Failed to load SPC mesoscale discussions:', err);
+      console.warn('Primary NWS SWO/ACUS11 MCD fetch failed, trying SPC RSS fallback:', err);
     }
+
+    // Fallback to official NOAA SPC Mesoscale Discussion RSS XML if NWS SWO returned empty
+    if (apiDiscussions.length === 0) {
+      try {
+        const rssRes = await fetch('https://www.spc.noaa.gov/products/spcmdrss.xml');
+        if (rssRes.ok) {
+          const xmlText = await rssRes.text();
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+          const items = Array.from(xmlDoc.querySelectorAll('item')).slice(0, 6);
+
+          const parsedRss: MesoscaleDiscussion[] = [];
+          items.forEach((item, idx) => {
+            const descriptionHtml = item.querySelector('description')?.textContent || '';
+            const pubDate = item.querySelector('pubDate')?.textContent || new Date().toISOString();
+            const guid = item.querySelector('guid')?.textContent || `spc-rss-${idx}`;
+            const rawText = descriptionHtml.replace(/<[^>]+>/g, '').trim();
+            if (rawText && /Mesoscale Discussion/i.test(rawText)) {
+              parsedRss.push(parseMesoscaleDiscussion(guid, pubDate, rawText));
+            }
+          });
+          apiDiscussions = parsedRss;
+        }
+      } catch (rssErr) {
+        console.warn('SPC RSS fallback failed:', rssErr);
+      }
+    }
+
+    setRawApiDiscussions(apiDiscussions);
   };
 
   // High-Resolution Predictive Windy Point Forecast API Query
@@ -2372,10 +2833,10 @@ function App() {
                   <strong>Mandatory Geolocation Services:</strong> In order to provide active tracking and alerting of tornadoes and severe atmospheric events relative to your Safe Houses, D.A.I.S.Y. requires access to your physical geolocation context. Permission to use your geolocation is required to go any further.
                 </p>
                 <p className="text-[11px] leading-relaxed">
-                  <strong>Google Analytics Usage:</strong> We utilize Google Analytics for basic performance diagnostics and traffic monitoring to ensure tracking speed and application stability.
+                  <strong>Strict Local-Only Personal Storage:</strong> Your GPS coordinates and pinned Safe Houses are saved exclusively in your own device's <code>localStorage</code> so they persist when you install the app to your phone or computer. Your personal location is never transmitted to external databases or spreadsheets.
                 </p>
                 <p className="text-[11px] leading-relaxed">
-                  <strong>Transient State Session Limit:</strong> D.A.I.S.Y. stores monitored locations and severe weather tracking states strictly inside temporary sandboxed browser memory. Reloading or refreshing will cycle this state and reset all active alarms.
+                  <strong>Anonymous Storm & Mesoscale Telemetry:</strong> When radar rotation or SPC Mesoscale Discussions are detected, only anonymous storm polygon centroids, public airport ASOS station IDs, and SPC <code>LAT...LON</code> watch corridors are logged for meteorological correlation.
                 </p>
               </div>
               <p className="text-[10px] text-slate-600 font-medium">
@@ -2452,7 +2913,7 @@ function App() {
           </p>
 
           <p className="text-slate-600 font-semibold max-w-sm text-sm leading-relaxed mb-8">
-            Severe convective tracking and radar analysis gateway. Establishes localized siren sirens and trajectory tracking boundaries.
+            Severe convective tracking and radar analysis gateway. Establishes localized siren alarms and trajectory tracking boundaries.
           </p>
 
           {isActivating ? (
@@ -2477,24 +2938,24 @@ function App() {
             </button>
           )}
 
-          {/* Secure Client Sandbox Disclaimers & Session Risk Information */}
+          {/* Secure Client Sandbox Disclaimers & Local Device Storage Information */}
           <div className="mt-8 max-w-md border border-slate-800 bg-slate-900/60 backdrop-blur-md rounded-2xl p-5 text-left text-xs text-slate-600 space-y-3 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
             <div className="flex items-start gap-3">
               <ShieldCheck className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
               <div>
-                <h2 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Data Protection Disclosure</h2>
-                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-600">
-                  D.A.I.S.Y. prioritizes private-by-default workflows. Geolocated coordinates, monitored secure spots, and historical alert profiles are calculated and kept exclusively inside your local browser storage. No user positions, network traces, or tracking files are sent, shared, or maintained by external cloud bases.
+                <h2 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Zero-PII Data Protection</h2>
+                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-400">
+                  D.A.I.S.Y. stores your GPS coordinates, monitored Safe Houses, and alert preferences strictly inside your device's local browser storage (<code>localStorage</code>). Your personal coordinates are never transmitted externally.
                 </p>
               </div>
             </div>
             
             <div className="flex items-start gap-3 border-t border-slate-800/60 pt-3">
-              <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              <Bell className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
               <div>
-                <h2 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Transient Session state Limit</h2>
-                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-600">
-                  This application functions as a high-frequency telemetry workspace. Reloading or refreshing your browser session forces a complete security clearance and state cycle. If you reload, you must reactivate alarms and grant GPS safety permissions again.
+                <h2 className="font-bold text-slate-200 text-xs uppercase tracking-wide">Installable App & Background Warnings</h2>
+                <p className="mt-0.5 leading-relaxed text-[11px] text-slate-400">
+                  Save D.A.I.S.Y. to your phone or computer home screen and enable Browser Alerts to receive background warning notifications when severe rotation or Mesoscale Discussions approach your saved location.
                 </p>
               </div>
             </div>
@@ -2614,6 +3075,58 @@ function App() {
                 >
                   <Download className="w-3.5 h-3.5" /> Install DAISY
                 </button>
+              )}
+
+              {/* Google Sheets Auto-Logging Connection Button */}
+              {!sheetsConnected ? (
+                <button
+                  id="google-sheets-signin-btn"
+                  type="button"
+                  onClick={handleConnectGoogleSheets}
+                  disabled={sheetsConnecting}
+                  className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                  title="Sign in with Google to automatically create a Google Sheet and log anonymous storm rotation & mesoscale telemetry in the background"
+                >
+                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 48 48">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                  </svg>
+                  <span>{sheetsConnecting ? 'Connecting Sheet...' : 'Sign in with Google'}</span>
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  {spreadsheetUrl ? (
+                    <a
+                      href={spreadsheetUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/40 text-emerald-700 dark:text-emerald-400 rounded-full text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5"
+                      title="Open your auto-created Google Sheet in a new tab"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Google Sheet Auto-Syncing
+                    </a>
+                  ) : (
+                    <span className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/40 text-emerald-700 dark:text-emerald-400 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Google Sheet Auto-Syncing
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      signOutGoogleSheets();
+                      setSheetsConnected(false);
+                      triggerToast('Disconnected Google Sheets auto-sync.', 'info');
+                    }}
+                    className="px-2.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-rose-500/10 text-slate-500 hover:text-rose-500 border border-slate-300 dark:border-slate-700 rounded-full text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
+                    title="Disconnect Google Sheets"
+                  >
+                    Sign Out
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -3201,35 +3714,48 @@ function App() {
               Active Proximity Alerts
             </h2>
             
-            {/* Filter Toggle for storm motion or impact trajectory headed towards the user */}
-            {alerts.length > 0 && (
-              <div className="flex bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800/80 self-stretch sm:self-auto">
-                <button
-                  id="show-all-threats-btn"
-                  type="button"
-                  onClick={() => setShowHeadedTowardsOnly(false)}
-                  className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider ${
-                    !showHeadedTowardsOnly
-                      ? 'bg-slate-800 dark:bg-slate-800 text-white shadow-[0_2px_8px_rgba(0,0,0,0.2)]'
-                      : 'text-slate-600 dark:text-slate-600 hover:text-slate-700 dark:hover:text-slate-200'
-                  }`}
-                >
-                  All Alerts ({alerts.length})
-                </button>
-                <button
-                  id="show-headed-threats-btn"
-                  type="button"
-                  onClick={() => setShowHeadedTowardsOnly(true)}
-                  className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 ${
-                    showHeadedTowardsOnly
-                      ? 'bg-rose-600 dark:bg-rose-500 text-white shadow-[0_2px_8px_rgba(225,29,72,0.3)]'
-                      : 'text-slate-600 dark:text-slate-600 hover:text-slate-700 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Headed Towards Me ({alerts.filter((a) => a.headedTowards || a.isDirectHit).length})
-                </button>
-              </div>
-            )}
+            {/* Filter Toggle for storm motion, impact trajectory, and Mesoscale Discussion cards (hidden by default) */}
+            <div className="flex flex-wrap bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800/80 self-stretch sm:self-auto gap-1">
+              <button
+                id="show-all-threats-btn"
+                type="button"
+                onClick={() => setShowHeadedTowardsOnly(false)}
+                className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider cursor-pointer ${
+                  !showHeadedTowardsOnly
+                    ? 'bg-slate-800 dark:bg-slate-800 text-white shadow-[0_2px_8px_rgba(0,0,0,0.2)]'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                }`}
+              >
+                All Alerts ({alerts.length})
+              </button>
+              <button
+                id="show-headed-threats-btn"
+                type="button"
+                onClick={() => setShowHeadedTowardsOnly(true)}
+                className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer ${
+                  showHeadedTowardsOnly
+                    ? 'bg-rose-600 dark:bg-rose-500 text-white shadow-[0_2px_8px_rgba(225,29,72,0.3)]'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                }`}
+              >
+                Headed Towards Me ({alerts.filter((a) => a.headedTowards || a.isDirectHit).length})
+              </button>
+              <button
+                id="toggle-mesoscale-cards-btn"
+                type="button"
+                onClick={() => setShowMesoscaleCards((prev) => !prev)}
+                className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer ${
+                  showMesoscaleCards
+                    ? 'bg-amber-500 text-slate-950 shadow-[0_2px_8px_rgba(245,158,11,0.3)]'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-amber-500 dark:hover:text-amber-400'
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                {showMesoscaleCards
+                  ? `Hide Mesoscale Cards (${discussions.length})`
+                  : `Mesoscale Discussions (${discussions.length})`}
+              </button>
+            </div>
           </div>
 
           {alerts.length === 0 ? (
@@ -3296,7 +3822,8 @@ function App() {
           </Suspense>
         </div>
 
-        {/* SPC Mesoscale Discussions Listings Section */}
+        {/* SPC Mesoscale Discussions Listings Section (Hidden by default until toggled via Filter Bar) */}
+        {showMesoscaleCards && (
         <section className="mt-8 flex flex-col gap-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
             <h2 className="text-xl md:text-2xl font-black text-slate-800 dark:text-white font-sans tracking-wide uppercase flex items-center gap-2">
@@ -3350,8 +3877,11 @@ function App() {
           {/* Discussions Cards Deck */}
           {discussions.length === 0 ? (
             <div className="bg-white dark:bg-slate-900/10 border-2 border-dashed border-slate-200 dark:border-slate-800/85 rounded-3xl p-10 text-center shadow-sm">
-              <p className="text-slate-600 font-bold text-xs uppercase tracking-widest leading-relaxed">
-                Loading Storm Prediction Center Discussions...
+              <p className="text-slate-600 dark:text-slate-400 font-bold text-xs uppercase tracking-widest leading-relaxed">
+                No Active SPC Mesoscale Discussions Currently Issued By NOAA Storm Prediction Center
+              </p>
+              <p className="text-[10px] font-mono text-slate-500 mt-1">
+                Polling NWS SWO (ACUS11 / SWOMCD) &amp; NOAA SPC live feeds every 60s for new watch corridors.
               </p>
             </div>
           ) : (
@@ -3391,7 +3921,7 @@ function App() {
                             )}
                           </div>
                           <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase font-sans tracking-tight mt-2 leading-none">
-                            MCD {md.number}
+                            MCD #{md.number} — {md.concerning}
                           </h3>
                         </div>
                         
@@ -3403,15 +3933,15 @@ function App() {
 
                       {/* Sub details */}
                       <div className="space-y-1.5 mt-4">
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-600">
-                          <span className="font-bold text-slate-700 dark:text-slate-300">Affecting:</span>
-                          <span className="truncate">{md.areasAffected}</span>
+                        <div className="flex items-start gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
+                          <span className="font-bold text-slate-700 dark:text-slate-300 shrink-0">Affecting:</span>
+                          <span>{md.areasAffected}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-600">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
                           <span className="font-bold text-slate-700 dark:text-slate-300">Valid:</span>
                           <span>{md.validTime}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-600">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
                           <span className="font-bold text-slate-700 dark:text-slate-300">Proximity:</span>
                           <span className={md.isIntersecting ? 'text-red-500 font-extrabold' : ''}>
                             {md.isIntersecting ? 'Direct Grid Overlapping' : `${md.minDist.toFixed(1)} miles away`}
@@ -3419,8 +3949,44 @@ function App() {
                         </div>
                       </div>
 
+                      {/* Target Watch Area LAT/LON Corridor & Peak Intensity Metrics */}
+                      {md.watchBox && md.centroid && (
+                        <div className="mt-4 p-3.5 rounded-2xl bg-amber-500/5 border border-amber-500/20 font-mono text-[10px] space-y-1.5">
+                          <div className="font-black uppercase text-amber-600 dark:text-amber-400 flex items-center justify-between">
+                            <span>Most Likely Watch Corridor (LAT / LON)</span>
+                            <span>{md.coordinates.length} Vertices</span>
+                          </div>
+                          <div className="text-slate-700 dark:text-slate-300 font-bold">
+                            LAT: {md.watchBox.minLat.toFixed(2)}°N to {md.watchBox.maxLat.toFixed(2)}°N &nbsp;|&nbsp; LON: {md.watchBox.minLon.toFixed(2)}°W to {md.watchBox.maxLon.toFixed(2)}°W
+                          </div>
+                          <div className="text-slate-500 dark:text-slate-400">
+                            Corridor Centroid: {md.centroid.lat.toFixed(3)}°N, {md.centroid.lon.toFixed(3)}°W
+                            {md.wfoList && md.wfoList.length > 0 ? ` • WFOs: ${md.wfoList.join(', ')}` : ''}
+                          </div>
+                          {(md.peakTornadoIntensity || md.peakWindGust || md.peakHailSize) && (
+                            <div className="pt-1.5 border-t border-amber-500/20 flex flex-wrap gap-2">
+                              {md.peakTornadoIntensity && (
+                                <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 font-black">
+                                  PEAK TORNADO: {md.peakTornadoIntensity}
+                                </span>
+                              )}
+                              {md.peakWindGust && (
+                                <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-neon-aqua font-black">
+                                  PEAK WIND: {md.peakWindGust}
+                                </span>
+                              )}
+                              {md.peakHailSize && (
+                                <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-300 font-black">
+                                  PEAK HAIL: {md.peakHailSize}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Summary Paragraph */}
-                      <p className="mt-4 text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-600 bg-slate-50 dark:bg-slate-950 p-4 border border-slate-200 dark:border-slate-800/60 rounded-2xl">
+                      <p className="mt-4 text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-950 p-4 border border-slate-200 dark:border-slate-800/60 rounded-2xl">
                         {md.summary}
                       </p>
 
@@ -3453,6 +4019,7 @@ function App() {
             </div>
           )}
         </section>
+        )}
       </div>
     </main>
   );

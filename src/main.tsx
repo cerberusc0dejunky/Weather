@@ -33,38 +33,23 @@ if (container) {
   console.error("Failed to find the root element.");
 }
 
-// Register PWA service worker in production; unregister and purge stale caches on localhost/dev
+// Register PWA service worker for standalone installation and background notifications
 if ('serviceWorker' in navigator) {
-  const isLocalhost =
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1' ||
-    Boolean((import.meta as any).env?.DEV);
-
-  if (isLocalhost) {
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      registrations.forEach((reg) => reg.unregister());
-    });
-    if ('caches' in window) {
-      caches.keys().then((keys) => {
-        keys.forEach((key) => caches.delete(key));
+  const registerSW = () => {
+    const swUrl = `${(import.meta as any).env?.BASE_URL || '/'}sw.js`;
+    navigator.serviceWorker
+      .register(swUrl)
+      .then((registration) => {
+        console.log('DAISY ServiceWorker registered on scope:', registration.scope);
+      })
+      .catch((error) => {
+        console.warn('DAISY ServiceWorker registration failed:', error);
       });
-    }
-  } else {
-    const registerSW = () => {
-      const swUrl = `${(import.meta as any).env?.BASE_URL || '/'}sw.js`;
-      navigator.serviceWorker.register(swUrl)
-        .then((registration) => {
-          console.log('DAISY ServiceWorker successfully registered on scope:', registration.scope);
-        })
-        .catch((error) => {
-          console.warn('DAISY ServiceWorker registration failed:', error);
-        });
-    };
+  };
 
-    if (document.readyState === 'complete') {
-      registerSW();
-    } else {
-      window.addEventListener('load', registerSW);
-    }
+  if (document.readyState === 'complete') {
+    registerSW();
+  } else {
+    window.addEventListener('load', registerSW);
   }
 }

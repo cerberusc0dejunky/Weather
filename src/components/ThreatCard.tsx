@@ -1,4 +1,4 @@
-import { AlertTriangle, MapPin, Zap, RefreshCw, Eye } from 'lucide-react';
+import { AlertTriangle, MapPin, Zap, RefreshCw, Eye, Compass, Navigation } from 'lucide-react';
 import { motion } from 'motion/react';
 import { NWSAlert } from '../types';
 
@@ -10,7 +10,26 @@ interface ThreatCardProps {
 }
 
 export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: ThreatCardProps) {
-  const { event, areaDesc, expires, minDist, isDirectHit, headedTowards, etaMinutes, snippet, keywords, justUpdated } = alert;
+  const {
+    event,
+    areaDesc,
+    expires,
+    minDist,
+    centroidDist,
+    centroidDir,
+    edgeDir,
+    closestAssetName,
+    radarLocationHeadline,
+    impactedLocations,
+    maxWindHailTag,
+    stormCoreAddress,
+    isDirectHit,
+    headedTowards,
+    etaMinutes,
+    snippet,
+    keywords,
+    justUpdated,
+  } = alert;
   const upperEvent = event.toUpperCase();
   const isWatch = upperEvent.includes('WATCH');
   const isEmergency = !isWatch && (keywords.emergency || upperEvent.includes('TORNADO EMERGENCY'));
@@ -37,44 +56,67 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
     if (isWatch) {
       actionText = 'PREPARE IN ADVANCE';
       actionBg = 'bg-amber-50 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-500 text-amber-700 dark:text-amber-400';
-      actionSubtext = 'Conditions favorable for severe systems';
+      actionSubtext = 'Your location is inside the active watch boundary';
     } else if (isTornado) {
       actionText = 'TAKE COVER NOW';
       actionBg = 'bg-red-50 dark:bg-red-950 border-2 border-red-500 text-red-700 dark:text-red-100 animate-pulse';
-      actionSubtext = 'Go to basement or interior safety room';
+      actionSubtext =
+        centroidDist !== undefined && centroidDir
+          ? `Rotation core is ${centroidDist.toFixed(1)} mi ${centroidDir} of ${closestAssetName || 'your location'}`
+          : 'Go to basement or interior safety room immediately';
     } else if (isSevereThunderstorm) {
       actionText = 'PREPARE FOR IMPACT';
       actionBg = 'bg-orange-50 dark:bg-orange-950 border-2 border-orange-500 text-orange-700 dark:text-orange-200';
-      actionSubtext = 'Severe wind or hail threat imminent';
+      actionSubtext =
+        centroidDist !== undefined && centroidDir
+          ? `Storm core is ${centroidDist.toFixed(1)} mi ${centroidDir} of ${closestAssetName || 'your location'}`
+          : 'Severe wind or hail threat imminent at your location';
     } else {
       actionText = 'HAZARD IMMINENT';
       actionBg = 'bg-amber-50 dark:bg-amber-950 border border-amber-500 text-amber-700 dark:text-amber-300';
-      actionSubtext = 'Storm inside your zone';
+      actionSubtext =
+        centroidDist !== undefined && centroidDir
+          ? `Cell center is ${centroidDist.toFixed(1)} mi ${centroidDir} of ${closestAssetName || 'your location'}`
+          : 'Active weather statement covers your location';
     }
   } else if (minDist <= 25) {
     if (isTornado && headedTowards) {
       actionText = 'TAKE SHELTER SOON';
       actionBg = 'bg-red-50 dark:bg-red-950 border border-red-500 text-red-700 dark:text-red-200';
-      actionSubtext = `Storm heading towards you, ETA: ${etaMinutes || 'Calculating'} mins`;
+      actionSubtext = `Tracking towards ${closestAssetName || 'you'} • Est. Arrival: ${etaMinutes || 'Calculating'} mins`;
     } else {
       actionText = 'IMMINENT REGIONAL THREAT';
       actionBg = 'bg-slate-50 dark:bg-slate-900 border border-amber-400 dark:border-amber-500 text-amber-700 dark:text-amber-200';
-      actionSubtext = 'Severe convective cell within 25 miles';
+      actionSubtext = `Warning edge ${minDist.toFixed(1)} mi ${edgeDir || ''} of ${closestAssetName || 'your location'}`;
     }
   } else if (minDist <= 50) {
     actionText = 'CLOSED INTERVAL WARNING';
     actionBg = 'bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300';
-    actionSubtext = 'Weather cell within 50 miles monitoring radius';
+    actionSubtext = `Cell boundary ${minDist.toFixed(1)} mi ${edgeDir || ''} away`;
   }
 
   let distanceLabel = 'OUTSIDE AREA';
   if (hasAssets) {
-    if (minDist === 0 || isDirectHit) {
-      distanceLabel = 'IN ZONE';
+    if (isDirectHit) {
+      if (centroidDist !== undefined && centroidDist < 999 && centroidDir) {
+        if (minDist > 0 && minDist < 999) {
+          distanceLabel = `EDGE ${minDist.toFixed(1)} MI ${edgeDir || ''} • CORE ${centroidDist.toFixed(1)} MI ${centroidDir}`;
+        } else {
+          distanceLabel = `INSIDE POLYGON • CORE ${centroidDist.toFixed(1)} MI ${centroidDir}`;
+        }
+      } else if (minDist > 0 && minDist < 999) {
+        distanceLabel = `IN COUNTY ZONE • EDGE ${minDist.toFixed(1)} MI ${edgeDir || ''}`;
+      } else {
+        distanceLabel = `DIRECTLY OVER ${closestAssetName ? closestAssetName.toUpperCase() : 'YOUR LOCATION'}`;
+      }
     } else if (minDist > 0 && minDist < 999) {
-      distanceLabel = `${minDist.toFixed(1)} MILES AWAY`;
+      if (centroidDist !== undefined && centroidDist < 999 && centroidDir) {
+        distanceLabel = `${minDist.toFixed(1)} MI ${edgeDir || ''} (CORE ${centroidDist.toFixed(1)} MI ${centroidDir})`;
+      } else {
+        distanceLabel = `${minDist.toFixed(1)} MILES ${edgeDir ? `${edgeDir} ` : ''}AWAY`;
+      }
     } else {
-      distanceLabel = 'WATCH AREA';
+      distanceLabel = 'REGIONAL COUNTY WATCH';
     }
   }
 
@@ -155,19 +197,60 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
             {actionText}
           </span>
           
-          {/* ALWAYS VISIBLE DISTANCE LINE (Change 1 Fix) */}
-          <span className="text-xs font-black tracking-widest mt-2 flex items-center justify-center bg-slate-900/5 dark:bg-black/40 py-1.5 px-3 rounded-full border border-slate-900/10 dark:border-white/10 uppercase text-slate-800 dark:text-white">
-            <AlertTriangle className="w-3.5 h-3.5 mr-1.5 text-rose-500 dark:text-neon-pink" />
-            PHYSICAL DISTANCE: <span className="text-rose-600 dark:text-neon-pink ml-1">{distanceLabel}</span>
+          {/* DETAILED DISTANCE & BEARING LINE */}
+          <span className="text-[11px] font-black tracking-wider mt-2 flex items-center justify-center bg-slate-900/5 dark:bg-black/40 py-1.5 px-3 rounded-full border border-slate-900/10 dark:border-white/10 uppercase text-slate-800 dark:text-white">
+            <AlertTriangle className="w-3.5 h-3.5 mr-1.5 shrink-0 text-rose-500 dark:text-neon-pink" />
+            <span className="truncate">
+              PROXIMITY: <span className="text-rose-600 dark:text-neon-pink ml-1">{distanceLabel}</span>
+            </span>
           </span>
 
-          <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400 mt-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-600 dark:text-slate-300 mt-2">
             {actionSubtext}
           </span>
         </div>
 
+        {/* High-Detail Radar Pinpoint, Reverse-Geocoded Street/Highway Corridor & Pathcast */}
+        {(stormCoreAddress || radarLocationHeadline || impactedLocations || maxWindHailTag) && (
+          <div className="mt-4 p-3.5 bg-cyan-950/10 dark:bg-slate-950/90 border border-cyan-500/30 dark:border-cyan-500/30 rounded-xl space-y-2 transition-colors">
+            <span className="text-[10px] font-black uppercase text-cyan-700 dark:text-neon-aqua tracking-wider flex items-center gap-1.5">
+              <Navigation className="w-3.5 h-3.5 text-cyan-600 dark:text-neon-aqua shrink-0" />
+              Pinpoint Storm Location &amp; Corridor Details
+            </span>
+
+            {stormCoreAddress && (
+              <div className="text-xs font-bold text-slate-800 dark:text-white bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1.5 rounded-lg">
+                <span className="text-[9px] font-mono font-black uppercase text-cyan-700 dark:text-neon-aqua block">
+                  Nearest Road / Locality Under Storm Core:
+                </span>
+                {stormCoreAddress}
+              </div>
+            )}
+
+            {radarLocationHeadline && (
+              <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 leading-snug">
+                <strong className="text-slate-900 dark:text-white uppercase text-[10px] font-mono mr-1">Doppler Fix:</strong>
+                {radarLocationHeadline}
+              </p>
+            )}
+
+            {impactedLocations && (
+              <p className="text-[10px] font-medium text-slate-600 dark:text-slate-300 leading-snug border-t border-slate-200 dark:border-slate-800 pt-1.5">
+                <strong className="text-amber-600 dark:text-amber-400 uppercase font-mono mr-1">In Storm Path:</strong>
+                {impactedLocations}
+              </p>
+            )}
+
+            {maxWindHailTag && (
+              <div className="text-[10px] font-mono font-black uppercase text-rose-600 dark:text-rose-400 pt-1">
+                {maxWindHailTag}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Areas / Counties Block */}
-        <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl transition-colors">
+        <div className="mt-3 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl transition-colors">
           <span className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center mb-1">
             <MapPin className="w-3 h-3 mr-1" /> Affected Area Description
           </span>
@@ -182,7 +265,7 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
             <span className="text-[10px] font-black uppercase text-rose-600 dark:text-red-400 tracking-wider flex items-center mb-0.5">
               <Zap className="w-3 h-3 mr-1 text-rose-500 dark:text-red-500" /> Ground Hazards / Observations
             </span>
-            <p className="text-xs font-bold text-rose-800 dark:text-red-200 uppercase tracking-wide line-clamp-2">
+            <p className="text-xs font-bold text-rose-800 dark:text-red-200 uppercase tracking-wide line-clamp-3">
               {snippet}
             </p>
           </div>
