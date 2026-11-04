@@ -3,6 +3,7 @@
   "appId": "1:684447300274:web:fa8ffd87d69d81fa93e7ab",
   "apiKey": "AIzaSyCfmLKgbQh1NcTBqULxpo_Oq3QGm2iC0BM",
   "authDomain": "gen-lang-client-0827067704.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-weather-d163c7c7-ebc2-4b85-9628-5f337a69ae5e",
   "storageBucket": "gen-lang-client-0827067704.firebasestorage.app",
   "messagingSenderId": "684447300274",
   "measurementId": "",

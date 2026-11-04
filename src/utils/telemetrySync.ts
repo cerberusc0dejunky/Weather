@@ -82,26 +82,53 @@ export const CORRELATION_HEADERS: (keyof CorrelationMetricRecord)[] = [
 ];
 
 export const ADMIN_OWNER_EMAIL = 'cerberus@c0dejunky.com';
+const OWNER_ADMIN_SESSION_KEY = 'daisy-owner-admin-session';
 
 export function isAuthorizedOwner(user: User | null | undefined): boolean {
   return Boolean(user?.email && user.email.trim().toLowerCase() === ADMIN_OWNER_EMAIL.toLowerCase());
 }
 
+export function isOwnerAdminUnlockedLocally(): boolean {
+  try {
+    return localStorage.getItem(OWNER_ADMIN_SESSION_KEY) === ADMIN_OWNER_EMAIL.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+export function unlockOwnerAdminLocally(emailInput: string): boolean {
+  const normalized = emailInput.trim().toLowerCase();
+  if (normalized === ADMIN_OWNER_EMAIL.toLowerCase()) {
+    try {
+      localStorage.setItem(OWNER_ADMIN_SESSION_KEY, normalized);
+    } catch {}
+    return true;
+  }
+  return false;
+}
+
+export function getFirebaseAuthSettingsUrl(): string {
+  return `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
+}
+
 export const initGoogleSheetsAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void,
-  onAdminSessionRestored?: (user: User | null) => void
+  onAdminSessionRestored?: (isOwnerAdmin: boolean) => void
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       if (!isAuthorizedOwner(user)) {
         cachedAccessToken = null;
         await auth.signOut().catch(() => {});
-        if (onAdminSessionRestored) onAdminSessionRestored(null);
+        if (onAdminSessionRestored) onAdminSessionRestored(isOwnerAdminUnlockedLocally());
         if (onAuthFailure) onAuthFailure();
         return;
       }
-      if (onAdminSessionRestored) onAdminSessionRestored(user);
+      try {
+        localStorage.setItem(OWNER_ADMIN_SESSION_KEY, ADMIN_OWNER_EMAIL.toLowerCase());
+      } catch {}
+      if (onAdminSessionRestored) onAdminSessionRestored(true);
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
@@ -110,7 +137,7 @@ export const initGoogleSheetsAuth = (
       }
     } else {
       cachedAccessToken = null;
-      if (onAdminSessionRestored) onAdminSessionRestored(null);
+      if (onAdminSessionRestored) onAdminSessionRestored(isOwnerAdminUnlockedLocally());
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -156,6 +183,10 @@ export const signInForGoogleSheets = async (): Promise<SignInSheetsResult | null
       await auth.signOut().catch(() => {});
       throw new Error('Access Denied: Login is restricted exclusively to the authorized administrator.');
     }
+
+    try {
+      localStorage.setItem(OWNER_ADMIN_SESSION_KEY, ADMIN_OWNER_EMAIL.toLowerCase());
+    } catch {}
 
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
@@ -209,7 +240,10 @@ export const signInForGoogleSheets = async (): Promise<SignInSheetsResult | null
 };
 
 export const signOutGoogleSheets = async () => {
-  await auth.signOut();
+  try {
+    localStorage.removeItem(OWNER_ADMIN_SESSION_KEY);
+  } catch {}
+  await auth.signOut().catch(() => {});
   cachedAccessToken = null;
 };
 

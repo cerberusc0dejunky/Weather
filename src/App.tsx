@@ -32,6 +32,9 @@ import {
   getSavedSpreadsheetUrl,
   getSavedCorrelationRecords,
   exportCorrelationRecordsCsv,
+  isOwnerAdminUnlockedLocally,
+  unlockOwnerAdminLocally,
+  getFirebaseAuthSettingsUrl,
 } from './utils/telemetrySync';
 import ThreatCard from './components/ThreatCard';
 import WindGauge from './components/WindGauge';
@@ -536,12 +539,14 @@ function App() {
   }, [armed]);
 
   // Owner-only Admin & Google Sheets OAuth state (restricted exclusively to cerberus@c0dejunky.com)
-  const [isAdminUser, setIsAdminUser] = useState<boolean>(false);
+  const [isAdminUser, setIsAdminUser] = useState<boolean>(() => isOwnerAdminUnlockedLocally());
   const [sheetsConnected, setSheetsConnected] = useState<boolean>(false);
   const [sheetsConnecting, setSheetsConnecting] = useState<boolean>(false);
   const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(() => getSavedSpreadsheetUrl());
   const [sheetsApiError, setSheetsApiError] = useState<string | null>(null);
   const [sheetsEnableUrl, setSheetsEnableUrl] = useState<string | null>(null);
+  const [unauthorizedDomainModal, setUnauthorizedDomainModal] = useState<string | null>(null);
+  const [ownerEmailInput, setOwnerEmailInput] = useState<string>('');
   const syncedRotationIdsRef = useRef<Set<string>>(new Set());
   const syncedMcdIdsRef = useRef<Set<string>>(new Set());
 
@@ -555,9 +560,9 @@ function App() {
       () => {
         setSheetsConnected(false);
       },
-      (adminUser) => {
-        setIsAdminUser(Boolean(adminUser));
-        if (adminUser) {
+      (isOwnerAdmin) => {
+        setIsAdminUser(isOwnerAdmin);
+        if (isOwnerAdmin) {
           setSpreadsheetUrl(getSavedSpreadsheetUrl());
         }
       }
@@ -574,6 +579,7 @@ function App() {
       const res = await signInForGoogleSheets();
       if (res) {
         setIsAdminUser(true);
+        setUnauthorizedDomainModal(null);
         if (res.apiError) {
           setSheetsConnected(false);
           setSheetsApiError(res.apiError);
@@ -595,9 +601,29 @@ function App() {
         }
       }
     } catch (err: any) {
-      triggerToast(err?.message || 'Admin Google sign-in was cancelled or denied.', 'error');
+      const errCode = String(err?.code || '');
+      const errMsg = String(err?.message || '');
+      if (errCode === 'auth/unauthorized-domain' || errMsg.includes('auth/unauthorized-domain')) {
+        const currentDomain = window.location.hostname || window.location.host;
+        setUnauthorizedDomainModal(currentDomain);
+      } else {
+        triggerToast(err?.message || 'Admin Google sign-in was cancelled or denied.', 'error');
+      }
     } finally {
       setSheetsConnecting(false);
+    }
+  };
+
+  const handleOwnerDirectUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (unlockOwnerAdminLocally(ownerEmailInput)) {
+      setIsAdminUser(true);
+      setSpreadsheetUrl(getSavedSpreadsheetUrl());
+      setUnauthorizedDomainModal(null);
+      setOwnerEmailInput('');
+      triggerToast('Owner Admin controls unlocked for this device.', 'success');
+    } else {
+      triggerToast('Access Denied: Email does not match the authorized owner.', 'error');
     }
   };
 
@@ -2914,6 +2940,106 @@ function App() {
         <Suspense fallback={null}>
           <GeolocationModal onAccept={handleLocationAccept} onDecline={handleLocationDecline} />
         </Suspense>
+      )}
+
+      {/* Owner Admin Unlock & Firebase Authorized Domain Modal */}
+      {unauthorizedDomainModal && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-[420] flex items-center justify-center p-6">
+          <div className="bg-slate-900 border border-cyan-500/40 rounded-3xl p-6 max-w-lg w-full shadow-[0_0_30px_rgba(34,211,238,0.25)] text-white space-y-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/40 flex items-center justify-center text-neon-aqua">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black uppercase tracking-wider text-white">
+                    Owner Admin Verification
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Unlock Admin Controls or authorize this domain for Google Sheets OAuth
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUnauthorizedDomainModal(null)}
+                className="text-slate-400 hover:text-white text-lg font-bold px-2 cursor-pointer"
+                aria-label="Close modal"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Option 1: Instant Owner Unlock for CSV Download & Admin Controls */}
+            <form onSubmit={handleOwnerDirectUnlock} className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <div className="text-[11px] font-black uppercase tracking-wider text-cyan-400">
+                1. Instant Owner Admin Unlock (CSV Log & Controls)
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Enter your administrator email address to immediately unlock the <strong className="text-white">Download Log (.CSV)</strong> and Google Sheet controls on this device:
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="email"
+                  value={ownerEmailInput}
+                  onChange={(e) => setOwnerEmailInput(e.target.value)}
+                  placeholder="Enter owner administrator email..."
+                  className="flex-1 bg-slate-900 border border-slate-700 focus:border-neon-aqua rounded-xl px-3.5 py-2.5 text-xs text-white font-mono outline-none"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black uppercase text-xs tracking-wider rounded-xl cursor-pointer transition-all shrink-0"
+                >
+                  Unlock Admin
+                </button>
+              </div>
+            </form>
+
+            {/* Option 2: Whitelist Current Domain in Firebase Auth for Google Popup */}
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 space-y-3">
+              <div className="text-[11px] font-black uppercase tracking-wider text-amber-400">
+                2. Authorize Domain for Google Sheets OAuth Popup
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Firebase blocked the Google OAuth popup because <code className="text-amber-300 font-mono bg-slate-950 px-1.5 py-0.5 rounded">{unauthorizedDomainModal}</code> is not yet listed in your Firebase project&apos;s <strong className="text-white">Authorized domains</strong>.
+              </p>
+              <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                <code className="text-xs font-mono text-neon-aqua truncate">{unauthorizedDomainModal}</code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(unauthorizedDomainModal);
+                    triggerToast(`Copied domain: ${unauthorizedDomainModal}`, 'success');
+                  }}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer shrink-0"
+                >
+                  Copy Domain
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <a
+                  href={getFirebaseAuthSettingsUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black uppercase text-[10px] tracking-wider rounded-xl transition-all"
+                >
+                  Open Firebase Auth Settings ↗
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUnauthorizedDomainModal(null);
+                    handleConnectGoogleSheets();
+                  }}
+                  className="px-3.5 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 font-black uppercase text-[10px] tracking-wider rounded-xl cursor-pointer transition-all"
+                >
+                  Retry Google Popup Sign-In
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* PWA Saved/Install Guide Modal */}
