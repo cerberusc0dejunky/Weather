@@ -89,6 +89,7 @@ interface RadarMapProps {
   mapMode: 'radar' | 'wind';
   onMapModeChange: (mode: 'radar' | 'wind') => void;
   onSetCoordinates?: (lat: number, lon: number) => void;
+  onPinCoordinates?: (lat: number, lon: number) => void;
   customMapKey?: string;
 }
 
@@ -113,6 +114,7 @@ export default function RadarMap({
   mapMode,
   onMapModeChange,
   onSetCoordinates,
+  onPinCoordinates,
   customMapKey,
 }: RadarMapProps) {
   const [apiLoaded, setApiLoaded] = useState<boolean>(false);
@@ -129,7 +131,9 @@ export default function RadarMap({
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [addressSearchQuery, setAddressSearchQuery] = useState<string>('');
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lat: number; lon: number } | null>(null);
 
+  const mapWrapperRef = useRef<HTMLDivElement>(null);
   const coordsDisplayRef = useRef<HTMLSpanElement>(null);
   const windyMapRef = useRef<any>(null);
   const windyStoreRef = useRef<any>(null);
@@ -157,15 +161,53 @@ export default function RadarMap({
     return () => clearTimeout(timer);
   }, [mapMode]);
 
-  // Dynamically link setCoordinates trigger to global window to allow integration from leaflet popups
+  // Dynamically link setCoordinates trigger to global window to allow integration from leaflet popups without resetting map zoom
   useEffect(() => {
     if (onSetCoordinates) {
-      window.onMapSetCoordinates = onSetCoordinates;
+      window.onMapSetCoordinates = (lat: number, lon: number) => {
+        lastSetCoordinatesRef.current = { lat, lon };
+        onSetCoordinates(lat, lon);
+        if (windyMapRef.current && typeof windyMapRef.current.closePopup === 'function') {
+          try {
+            windyMapRef.current.closePopup();
+          } catch {}
+        }
+      };
     }
     return () => {
       delete window.onMapSetCoordinates;
     };
   }, [onSetCoordinates]);
+
+  const handleMapContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest('button, input, form, a, .daisy-context-menu')) {
+      return;
+    }
+    const map = windyMapRef.current;
+    if (!map || typeof map.mouseEventToLatLng !== 'function') return;
+
+    e.preventDefault();
+    try {
+      const latlng = map.mouseEventToLatLng(e.nativeEvent);
+      if (!latlng || typeof latlng.lat !== 'number' || typeof latlng.lng !== 'number') return;
+
+      const rect = mapWrapperRef.current?.getBoundingClientRect();
+      const relX = rect ? e.clientX - rect.left : 120;
+      const relY = rect ? e.clientY - rect.top : 120;
+      const clampedX = rect ? Math.min(Math.max(12, relX), Math.max(12, rect.width - 250)) : relX;
+      const clampedY = rect ? Math.min(Math.max(12, relY), Math.max(12, rect.height - 165)) : relY;
+
+      setContextMenu({
+        x: clampedX,
+        y: clampedY,
+        lat: latlng.lat,
+        lon: latlng.lng,
+      });
+    } catch (err) {
+      console.warn('Right-click coordinate conversion failed:', err);
+    }
+  };
 
   // Geocode location search utilizing Nominatim (failsafe free API)
   const handleGeoSearch = async (e: React.FormEvent) => {
@@ -211,15 +253,25 @@ export default function RadarMap({
   // Monitor script presence on mount
   useEffect(() => {
     const windyKey = customMapKey || localStorage.getItem('daisy-windy-map-key') || (import.meta as any).env?.VITE_WINDY_MAP_KEY;
-    if (!windyKey) {
-      console.warn('[RadarMap] No Windy API key configured. Instantly falling back to Leaflet failsafe map.');
+    if (!windyKey || (window as any).__daisyWindyAuthFailed) {
+      console.warn('[RadarMap] Windy API key missing or domain-restricted. Instantly falling back to Leaflet + NEXRAD failsafe map.');
       setInitError(true);
       return;
     }
 
+    const handleAuthFailed = () => {
+      setInitError(true);
+    };
+    window.addEventListener('daisy-windy-auth-failed', handleAuthFailed);
+
     let checkCount = 0;
     const interval = setInterval(() => {
       checkCount++;
+      if ((window as any).__daisyWindyAuthFailed) {
+        setInitError(true);
+        clearInterval(interval);
+        return;
+      }
       if (window.windyInit && window.L) {
         setApiLoaded(true);
         clearInterval(interval);
@@ -239,6 +291,7 @@ export default function RadarMap({
     }, 3500);
 
     return () => {
+      window.removeEventListener('daisy-windy-auth-failed', handleAuthFailed);
       clearInterval(interval);
       clearTimeout(timeout);
     };
@@ -264,6 +317,10 @@ export default function RadarMap({
   // Initialize Windy Map or Fallback with retry and timeout logic
   useEffect(() => {
     if (!apiLoaded || initError || !window.windyInit || !window.L) return;
+    if ((window as any).__daisyWindyAuthFailed) {
+      setInitError(true);
+      return;
+    }
 
     const container = document.getElementById('windy');
     if (!container) return;
@@ -275,7 +332,7 @@ export default function RadarMap({
         const timer = setTimeout(() => setRetryCount(prev => prev + 1), 1000);
         return () => clearTimeout(timer);
       } else {
-        console.error('[RadarMap] Failed to initialize Windy: container height remained 0px.');
+        console.warn('[RadarMap] Failed to initialize Windy: container height remained 0px.');
         setInitError(true);
         return;
       }
@@ -284,6 +341,17 @@ export default function RadarMap({
     container.innerHTML = '';
 
     let isSuccess = false;
+
+    const onWindyAuthFailed = () => {
+      if (!isSuccess) {
+        clearTimeout(bootTimeout);
+        if (container) {
+          container.innerHTML = '';
+        }
+        setInitError(true);
+      }
+    };
+    window.addEventListener('daisy-windy-auth-failed', onWindyAuthFailed);
     
     // Set 3.5-second timeout to transition cleanly to failsafe Leaflet + NEXRAD if windyInit callback never triggers (e.g., key restricted/expired)
     const bootTimeout = setTimeout(() => {
@@ -322,7 +390,7 @@ export default function RadarMap({
         updateInteractiveElements();
       });
     } catch (err) {
-      console.error('Windy Map initialization error:', err);
+      console.warn('Windy Map initialization error:', err);
       clearTimeout(bootTimeout);
       if (retryCount < 5) {
         setRetryCount(prev => prev + 1);
@@ -332,6 +400,7 @@ export default function RadarMap({
     }
 
     return () => {
+      window.removeEventListener('daisy-windy-auth-failed', onWindyAuthFailed);
       clearTimeout(bootTimeout);
       cleanupInteractiveElements();
     };
@@ -346,7 +415,7 @@ export default function RadarMap({
         const currentOverlayValue = windyStoreRef.current.get('overlay');
         console.log(`[RadarMap Monitor - Windy Live Sync] Method call 'store.set("overlay", "${mapMode}")' executed. Active Windy overlay store value is currently verified as: "${currentOverlayValue}"`);
       } catch (err) {
-        console.error(`[RadarMap Monitor - Windy Live Sync Error] API method call execution failed for mode "${mapMode}":`, err);
+        console.warn(`[RadarMap Monitor - Windy Live Sync Error] API method call execution failed for mode "${mapMode}":`, err);
       }
     } else {
       console.log(`[RadarMap Monitor] Windy API store instance is not initialized yet. Mode change to "${mapMode}" will apply on Windy load or run under failsafe Leaflet tile overlays.`);
@@ -382,6 +451,7 @@ export default function RadarMap({
         
         fallbackMapRef.current = fMap;
         windyMapRef.current = fMap;
+        lastSetCoordinatesRef.current = { lat: userLat, lon: userLon };
 
         // ResizeObserver to dynamically trigger map size invalidation
         resizeObserver = new ResizeObserver(() => {
@@ -394,23 +464,7 @@ export default function RadarMap({
         // Force initial update of elements on fallback map
         updateInteractiveElements();
       } catch (err) {
-        console.error('Error creating fallback Leaflet map:', err);
-      }
-    } else {
-      try {
-        const currentCenter = fallbackMapRef.current.getCenter();
-        const dist = Math.sqrt(
-          Math.pow(currentCenter.lat - userLat, 2) + 
-          Math.pow(currentCenter.lng - userLon, 2)
-        );
-        // Only setView if target coordinate is significantly shifted (e.g. searching a new location)
-        if (dist > 0.05) {
-          fallbackMapRef.current.setView([userLat, userLon], assets.length > 0 ? 8 : 6);
-        }
-      } catch (e) {
-        try {
-          fallbackMapRef.current.setView([userLat, userLon], assets.length > 0 ? 8 : 6);
-        } catch (err) {}
+        console.warn('Error creating fallback Leaflet map:', err);
       }
     }
 
@@ -428,7 +482,7 @@ export default function RadarMap({
         }
       }
     };
-  }, [initError, userLat, userLon, apiLoaded]);
+  }, [initError, apiLoaded]);
 
   // Failsafe Canvas Wind Particles Overlay
   useEffect(() => {
@@ -733,9 +787,15 @@ export default function RadarMap({
 
       map.on('zoomend', () => {
         setZoomLevel(map.getZoom());
+        setContextMenu(null);
+      });
+
+      map.on('dragstart', () => {
+        setContextMenu(null);
       });
 
       map.on('click', (e: any) => {
+        setContextMenu(null);
         const { lat, lng } = e.latlng;
 
         L.popup()
@@ -969,8 +1029,14 @@ export default function RadarMap({
           alertMarkersRef.current.push(stepMarker);
         });
 
-        // 4.2. Draw custom visual trajectory lines specifically relative to saved coordinates with calculated ETAs
-        assets.forEach((asset) => {
+        // 4.2. Draw custom visual trajectory lines specifically relative to active GPS probe & saved coordinates with calculated ETAs
+        const trajectoryTargets: LocationAsset[] = [
+          { id: 'active-gps-probe', name: 'Active GPS Location', lat: userLat, lon: userLon },
+          ...assets.filter(
+            (a) => Math.abs(a.lat - userLat) > 0.0005 || Math.abs(a.lon - userLon) > 0.0005
+          ),
+        ];
+        trajectoryTargets.forEach((asset) => {
           const result = getMemoizedMinPolygonDistance(asset.id, asset.lat, asset.lon, alert.id, alert.geometry.coordinates);
           if (!result.closestPt) return;
 
@@ -1337,9 +1403,68 @@ export default function RadarMap({
       )}
 
       {/* Map display field */}
-      <div className={`h-[320px] md:h-[400px] w-full relative transition-all duration-300 ${
-        isTransitioning ? 'brightness-95 contrast-105 saturate-125' : 'brightness-100 contrast-100 saturate-100'
-      }`}>
+      <div
+        ref={mapWrapperRef}
+        onContextMenu={handleMapContextMenu}
+        className={`h-[320px] md:h-[400px] w-full relative transition-all duration-300 ${
+          isTransitioning ? 'brightness-95 contrast-105 saturate-125' : 'brightness-100 contrast-100 saturate-100'
+        }`}
+      >
+        {/* Right-Click Tactical GPS Probe Context Menu */}
+        {contextMenu && (
+          <div
+            style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+            className="daisy-context-menu absolute z-[950] w-60 bg-slate-950/95 border-2 border-cyan-400 rounded-xl p-3 shadow-[0_0_25px_rgba(6,182,212,0.45)] backdrop-blur-md text-white animate-fade-in"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-2">
+              <span className="text-[9.5px] font-black uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-neon-pink animate-pulse" />
+                GPS Probe Target
+              </span>
+              <button
+                type="button"
+                onClick={() => setContextMenu(null)}
+                className="text-slate-400 hover:text-white text-xs font-black px-1 cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+            <div className="text-[10px] font-mono font-bold text-slate-200 bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1.5 mb-2.5 flex items-center justify-between">
+              <span>LAT/LON:</span>
+              <span className="text-neon-aqua">
+                {contextMenu.lat.toFixed(4)}, {contextMenu.lon.toFixed(4)}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  lastSetCoordinatesRef.current = { lat: contextMenu.lat, lon: contextMenu.lon };
+                  onSetCoordinates?.(contextMenu.lat, contextMenu.lon);
+                  setContextMenu(null);
+                }}
+                className="w-full py-2 px-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-[9.5px] uppercase tracking-wider rounded-lg cursor-pointer transition-all shadow-[0_0_12px_rgba(6,182,212,0.4)] flex items-center justify-center gap-1.5"
+              >
+                <Navigation className="w-3 h-3" />
+                Set as GPS & Measure Metrics
+              </button>
+              {onPinCoordinates && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    lastSetCoordinatesRef.current = { lat: contextMenu.lat, lon: contextMenu.lon };
+                    onPinCoordinates(contextMenu.lat, contextMenu.lon);
+                    setContextMenu(null);
+                  }}
+                  className="w-full py-1.5 px-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-neon-pink border border-slate-700 hover:border-neon-pink/50 font-black text-[9px] uppercase tracking-wider rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                >
+                  <MapPin className="w-3 h-3 text-neon-pink" />
+                  + Pin to Monitored Anchors
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {/* Failsafe Notification Toast */}
         {failsafeNotification && failsafeNotification.visible && (
           <div className="absolute top-16 left-3 right-3 z-[855] pointer-events-none flex justify-center">
@@ -1425,6 +1550,12 @@ export default function RadarMap({
               <Navigation className="w-3 h-3 text-cyan-400" />
               Recenter
             </button>
+
+            {/* Right-Click GPS Probe Hint Badge */}
+            <div className="hidden md:flex items-center gap-1.5 bg-slate-950/90 border border-cyan-500/30 rounded-xl px-2.5 py-1.5 shadow-2xl backdrop-blur-md text-cyan-300 font-mono text-[8.5px] font-black uppercase tracking-wider leading-none">
+              <MapPin className="w-3 h-3 text-neon-pink shrink-0" />
+              Right-Click Map: Set GPS Probe
+            </div>
           </div>
 
           {searchError && (

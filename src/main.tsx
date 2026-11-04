@@ -3,6 +3,22 @@ import {createRoot} from 'react-dom/client';
 import App from './App';
 import './index.css';
 
+// Intercept third-party Windy libBoot.js console.error when a Map API key is domain-restricted
+// in preview environments, converting it into an immediate failsafe switch to Leaflet + NOAA NEXRAD.
+const originalConsoleError = console.error.bind(console);
+console.error = (...args: any[]) => {
+  const firstMsg = typeof args[0] === 'string' ? args[0] : '';
+  if (firstMsg.includes('Failed to authorize Windy API key')) {
+    console.warn(
+      '[DAISY Radar Failsafe] Windy Map API key not authorized for this domain/environment — engaging Leaflet + NOAA NEXRAD radar failsafe.'
+    );
+    (window as any).__daisyWindyAuthFailed = true;
+    window.dispatchEvent(new CustomEvent('daisy-windy-auth-failed'));
+    return;
+  }
+  originalConsoleError(...args);
+};
+
 // Dynamically initialize Google Analytics if VITE_GA_MEASUREMENT_ID is configured
 const gaId = (import.meta as any).env?.VITE_GA_MEASUREMENT_ID;
 if (gaId) {

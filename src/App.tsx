@@ -535,7 +535,8 @@ function App() {
     };
   }, [armed]);
 
-  // Google Sheets OAuth state for automatic background spreadsheet creation & logging
+  // Owner-only Admin & Google Sheets OAuth state (restricted exclusively to cerberus@c0dejunky.com)
+  const [isAdminUser, setIsAdminUser] = useState<boolean>(false);
   const [sheetsConnected, setSheetsConnected] = useState<boolean>(false);
   const [sheetsConnecting, setSheetsConnecting] = useState<boolean>(false);
   const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(() => getSavedSpreadsheetUrl());
@@ -547,11 +548,18 @@ function App() {
   useEffect(() => {
     const unsubscribe = initGoogleSheetsAuth(
       () => {
+        setIsAdminUser(true);
         setSheetsConnected(true);
         setSpreadsheetUrl(getSavedSpreadsheetUrl());
       },
       () => {
         setSheetsConnected(false);
+      },
+      (adminUser) => {
+        setIsAdminUser(Boolean(adminUser));
+        if (adminUser) {
+          setSpreadsheetUrl(getSavedSpreadsheetUrl());
+        }
       }
     );
     return () => unsubscribe();
@@ -565,6 +573,7 @@ function App() {
     try {
       const res = await signInForGoogleSheets();
       if (res) {
+        setIsAdminUser(true);
         if (res.apiError) {
           setSheetsConnected(false);
           setSheetsApiError(res.apiError);
@@ -576,7 +585,7 @@ function App() {
           setSheetsConnected(true);
           setSpreadsheetUrl(res.spreadsheetUrl);
           triggerToast(
-            `Google Sheet connected! ${res.syncedCount ? `Synced ${res.syncedCount} captured storm record(s). ` : ''}Click "Open Auto-Sync Google Sheet" to view.`,
+            `Admin verified! Google Sheet connected${res.syncedCount ? ` & synced ${res.syncedCount} storm record(s)` : ''}.`,
             'success'
           );
         } else {
@@ -586,7 +595,7 @@ function App() {
         }
       }
     } catch (err: any) {
-      triggerToast(err?.message || 'Google Sheets sign-in was cancelled or failed.', 'error');
+      triggerToast(err?.message || 'Admin Google sign-in was cancelled or denied.', 'error');
     } finally {
       setSheetsConnecting(false);
     }
@@ -869,10 +878,11 @@ function App() {
     // Union of: manually-input discussions + live fetched discussions
     const allDiscussionsList = [...customMDs, ...rawApiDiscussions];
 
-    // Re-evaluate distance calculations for all monitored pins/current base coordinates
+    // Re-evaluate distance calculations for the active GPS probe & monitored pins
     const processedMDs = allDiscussionsList.map((md) => {
-      let minDist = 9999;
-      let isIntersecting = false;
+      const probeCheck = getParsedPolygonMinDistance(currentLat, currentLon, md.coordinates);
+      let minDist = probeCheck.minDist;
+      let isIntersecting = probeCheck.isInside;
 
       if (assets.length > 0) {
         assets.forEach((a) => {
@@ -882,10 +892,6 @@ function App() {
             minDist = check.minDist;
           }
         });
-      } else {
-        const check = getParsedPolygonMinDistance(currentLat, currentLon, md.coordinates);
-        if (check.isInside) isIntersecting = true;
-        minDist = check.minDist;
       }
 
       return {
@@ -1231,9 +1237,21 @@ function App() {
     const processedList: NWSAlert[] = [];
     const currentSignatures = new Set<string>();
     let freshUpdateCount = 0;
-    const effectiveAssets: LocationAsset[] = assets.length > 0
-      ? assets
-      : [{ id: 'current-loc', name: 'Current Position', lat: currentLat, lon: currentLon }];
+    const activeAssetMatch = assets.find(
+      (a) => Math.abs(a.lat - currentLat) < 0.001 && Math.abs(a.lon - currentLon) < 0.001
+    );
+    const activeProbeAsset: LocationAsset = {
+      id: activeAssetMatch?.id || 'current-gps',
+      name: activeAssetMatch?.name || `GPS Probe (${currentLat.toFixed(3)}, ${currentLon.toFixed(3)})`,
+      lat: currentLat,
+      lon: currentLon,
+    };
+    const effectiveAssets: LocationAsset[] = [
+      activeProbeAsset,
+      ...assets.filter(
+        (a) => a.id !== activeProbeAsset.id && (Math.abs(a.lat - currentLat) >= 0.001 || Math.abs(a.lon - currentLon) >= 0.001)
+      ),
+    ];
 
     features.forEach((feature: any) => {
       const props = feature.properties || {};
@@ -1544,31 +1562,20 @@ function App() {
         if (hasPolygonGeometry) {
           const polyCentroid = getGeometryCentroid(feature.geometry.coordinates);
 
-          let calculatedMin = 9999;
-          let closestPt: [number, number] | null = null;
-          let primaryAsset: LocationAsset = effectiveAssets[0];
-          let insidePoly = false;
-
           const alertId = props.id || feature.id || '';
-          effectiveAssets.forEach((a) => {
-            const result = getMemoizedMinPolygonDistance(
-              a.id,
-              a.lat,
-              a.lon,
-              alertId,
-              feature.geometry.coordinates
-            );
-            if (result.isInside && !insidePoly) {
-              insidePoly = true;
-              primaryAsset = a;
-              calculatedMin = result.minDist;
-              closestPt = result.closestPt;
-            } else if (!insidePoly && result.minDist < calculatedMin) {
-              calculatedMin = result.minDist;
-              closestPt = result.closestPt;
-              primaryAsset = a;
-            }
-          });
+          // Always measure card proximity, bearing, and ETA relative to the active GPS probe (activeProbeAsset),
+          // so right-clicking a location on the map immediately measures exact metrics for that point.
+          const probeResult = getMemoizedMinPolygonDistance(
+            activeProbeAsset.id,
+            activeProbeAsset.lat,
+            activeProbeAsset.lon,
+            alertId,
+            feature.geometry.coordinates
+          );
+          let primaryAsset: LocationAsset = activeProbeAsset;
+          let insidePoly = probeResult.isInside;
+          let calculatedMin = probeResult.minDist;
+          let closestPt: [number, number] | null = probeResult.closestPt;
 
           closestAssetName = primaryAsset.name;
 
@@ -2085,7 +2092,7 @@ function App() {
           suggestion = `Your Windy API key may lack point-forecast privileges or permission for active model '${model}'. Ensure key has appropriate subscriptions on Windy portal.`;
           
           // Explicitly log the full request URL and headers whenever a 400 error occurs
-          console.error('[Telemetry 400 Bad Request Error]', {
+          console.warn('[Telemetry 400 Bad Request Warning]', {
             timestamp: new Date().toISOString(),
             status: res.status,
             url: url,
@@ -2095,7 +2102,7 @@ function App() {
           });
         } else {
           if (settings.telemetryDebug) {
-            console.error('[Telemetry Debug] Windy Forecast Query Failed', {
+            console.warn('[Telemetry Debug] Windy Forecast Query Failed', {
               timestamp: new Date().toISOString(),
               status: res.status,
               error: errText
@@ -2283,7 +2290,7 @@ function App() {
     } catch (err: any) {
       console.warn('Silent fallback: Windy Point Forecast API query failed', err);
       if (settings.telemetryDebug) {
-        console.error('[Telemetry Debug] Caught Windy Point Forecast service error', {
+        console.warn('[Telemetry Debug] Caught Windy Point Forecast service error', {
           timestamp: new Date().toISOString(),
           error: err?.message || String(err)
         });
@@ -2623,6 +2630,74 @@ function App() {
 
   const handleRemovePin = (id: string) => {
     setAssets((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  // Set active GPS probe coordinates from right-click or click on the radar map
+  const handleSetGpsCoordinates = async (lat: number, lon: number) => {
+    const roundedLat = Number(lat.toFixed(5));
+    const roundedLon = Number(lon.toFixed(5));
+    setCurrentLat(roundedLat);
+    setCurrentLon(roundedLon);
+
+    const fallbackLabel = `GPS Probe (${roundedLat.toFixed(3)}, ${roundedLon.toFixed(3)})`;
+    setAssets((prev) => {
+      const hasCurrentGps = prev.some((a) => a.id === 'current-gps');
+      if (hasCurrentGps) {
+        return prev.map((a) =>
+          a.id === 'current-gps' ? { ...a, name: fallbackLabel, lat: roundedLat, lon: roundedLon } : a
+        );
+      }
+      return [{ id: 'current-gps', name: fallbackLabel, lat: roundedLat, lon: roundedLon }, ...prev];
+    });
+
+    fetchTelemetry(roundedLat, roundedLon);
+    fetchWindyPointTelemetry(roundedLat, roundedLon);
+    triggerToast(`GPS Probe moved to ${roundedLat.toFixed(4)}, ${roundedLon.toFixed(4)} — measuring storm & atmospheric metrics.`, 'info');
+
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${roundedLat}&lon=${roundedLon}&zoom=14&addressdetails=1`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'DAISY-Emergency-System/1.0 (contact: cerberus@c0dejunky.com)' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const resolvedName = `GPS: ${formatAddress(data.address, fallbackLabel)}`;
+        setAssets((prev) =>
+          prev.map((a) =>
+            a.id === 'current-gps' && Math.abs(a.lat - roundedLat) < 0.0001 && Math.abs(a.lon - roundedLon) < 0.0001
+              ? { ...a, name: resolvedName }
+              : a
+          )
+        );
+      }
+    } catch {}
+  };
+
+  // Pin right-clicked map coordinates as an additional saved Safe House anchor
+  const handlePinMapCoordinates = async (lat: number, lon: number) => {
+    const roundedLat = Number(lat.toFixed(5));
+    const roundedLon = Number(lon.toFixed(5));
+    const pinId = `pinned-${Date.now()}`;
+    const fallbackName = `Pinned (${roundedLat.toFixed(3)}, ${roundedLon.toFixed(3)})`;
+
+    setAssets((prev) => [...prev, { id: pinId, name: fallbackName, lat: roundedLat, lon: roundedLon }]);
+    setCurrentLat(roundedLat);
+    setCurrentLon(roundedLon);
+    fetchTelemetry(roundedLat, roundedLon);
+    fetchWindyPointTelemetry(roundedLat, roundedLon);
+    triggerToast(`Pinned new monitored anchor at ${roundedLat.toFixed(4)}, ${roundedLon.toFixed(4)}.`, 'success');
+
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${roundedLat}&lon=${roundedLon}&zoom=14&addressdetails=1`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'DAISY-Emergency-System/1.0 (contact: cerberus@c0dejunky.com)' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const resolvedName = formatAddress(data.address, fallbackName);
+        setAssets((prev) => prev.map((a) => (a.id === pinId ? { ...a, name: resolvedName } : a)));
+      }
+    } catch {}
   };
 
   const handleAddCustomMD = (inputText: string) => {
@@ -3166,25 +3241,21 @@ function App() {
                 </button>
               )}
 
-              {/* Google Sheets Auto-Logging Connection Button */}
-              {!sheetsConnected ? (
+              {/* Owner-Only Admin Controls: Google Sheets Auto-Sync & CSV Log are strictly hidden unless cerberus@c0dejunky.com is logged in */}
+              {!isAdminUser ? (
+                <button
+                  id="admin-owner-login-btn"
+                  type="button"
+                  onClick={handleConnectGoogleSheets}
+                  disabled={sheetsConnecting}
+                  className="px-3.5 py-2.5 bg-slate-100/70 dark:bg-slate-900/70 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-neon-aqua border border-slate-300/70 dark:border-slate-800 rounded-full text-[9.5px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  title="Owner-only administrator sign-in"
+                >
+                  <Key className="w-3 h-3" />
+                  <span>{sheetsConnecting ? 'Verifying...' : 'Admin'}</span>
+                </button>
+              ) : (
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    id="google-sheets-signin-btn"
-                    type="button"
-                    onClick={handleConnectGoogleSheets}
-                    disabled={sheetsConnecting}
-                    className="px-4 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/50 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
-                    title="Creates a Google Sheet named 'DAISY Storm Rotation & Mesoscale Correlation Log' in your Google Drive and automatically syncs all captured storm rotation & mesoscale data"
-                  >
-                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 48 48">
-                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                    </svg>
-                    <span>{sheetsConnecting ? 'Creating Google Sheet...' : 'Auto-Sync Google Sheet'}</span>
-                  </button>
                   {spreadsheetUrl && (
                     <a
                       href={spreadsheetUrl}
@@ -3197,46 +3268,17 @@ function App() {
                       Open Auto-Sync Google Sheet ↗
                     </a>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const ok = exportCorrelationRecordsCsv();
-                      if (ok) {
-                        triggerToast(`Exported ${getSavedCorrelationRecords().length} captured storm rotation & mesoscale record(s) to CSV.`, 'success');
-                      } else {
-                        triggerToast('No storm rotation or mesoscale correlation records captured yet.', 'info');
-                      }
-                    }}
-                    className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:border-cyan-500 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5"
-                    title="Download all locally captured rotation & mesoscale correlation records as a spreadsheet (.CSV)"
-                  >
-                    <Download className="w-3.5 h-3.5 text-cyan-500" />
-                    Download Log (.CSV)
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {spreadsheetUrl ? (
-                    <a
-                      href={spreadsheetUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 rounded-full text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5"
-                      title="Click to open your auto-created Google Sheet in a new tab"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      Open Auto-Sync Google Sheet ↗
-                    </a>
-                  ) : (
+                  {!sheetsConnected && (
                     <button
+                      id="google-sheets-signin-btn"
                       type="button"
                       onClick={handleConnectGoogleSheets}
                       disabled={sheetsConnecting}
-                      className="px-4 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
-                      title="Click to create and open your Google Sheet now"
+                      className="px-4 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/50 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                      title="Sync captured storm rotation & mesoscale data to your Google Sheet"
                     >
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      {sheetsConnecting ? 'Creating Google Sheet...' : 'Create & Open Auto-Sync Google Sheet ↗'}
+                      <span>{sheetsConnecting ? 'Syncing Sheet...' : spreadsheetUrl ? 'Sync Google Sheet Now' : 'Auto-Sync Google Sheet'}</span>
                     </button>
                   )}
                   <button
@@ -3259,11 +3301,12 @@ function App() {
                     type="button"
                     onClick={() => {
                       signOutGoogleSheets();
+                      setIsAdminUser(false);
                       setSheetsConnected(false);
-                      triggerToast('Disconnected Google Sheets auto-sync.', 'info');
+                      triggerToast('Signed out of Admin telemetry controls.', 'info');
                     }}
                     className="px-2.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-rose-500/10 text-slate-500 hover:text-rose-500 border border-slate-300 dark:border-slate-700 rounded-full text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
-                    title="Disconnect Google Sheets"
+                    title="Sign out and hide admin telemetry controls"
                   >
                     Sign Out
                   </button>
@@ -3272,7 +3315,7 @@ function App() {
             </div>
           </div>
 
-          {sheetsApiError && (
+          {isAdminUser && sheetsApiError && (
             <div className="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
               <div className="space-y-0.5">
                 <div className="font-black uppercase text-amber-500 text-[10px] tracking-wider">
@@ -3493,10 +3536,8 @@ function App() {
                 rotationPins={rotationPins}
                 mapMode={mapMode}
                 onMapModeChange={setMapMode}
-                onSetCoordinates={(lat, lon) => {
-                  setCurrentLat(lat);
-                  setCurrentLon(lon);
-                }}
+                onSetCoordinates={handleSetGpsCoordinates}
+                onPinCoordinates={handlePinMapCoordinates}
                 customMapKey={customMapKey}
               />
             </Suspense>

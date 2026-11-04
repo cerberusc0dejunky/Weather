@@ -81,12 +81,27 @@ export const CORRELATION_HEADERS: (keyof CorrelationMetricRecord)[] = [
   'isRotationInsideMcdCorridor',
 ];
 
+export const ADMIN_OWNER_EMAIL = 'cerberus@c0dejunky.com';
+
+export function isAuthorizedOwner(user: User | null | undefined): boolean {
+  return Boolean(user?.email && user.email.trim().toLowerCase() === ADMIN_OWNER_EMAIL.toLowerCase());
+}
+
 export const initGoogleSheetsAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
-  onAuthFailure?: () => void
+  onAuthFailure?: () => void,
+  onAdminSessionRestored?: (user: User | null) => void
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
+      if (!isAuthorizedOwner(user)) {
+        cachedAccessToken = null;
+        await auth.signOut().catch(() => {});
+        if (onAdminSessionRestored) onAdminSessionRestored(null);
+        if (onAuthFailure) onAuthFailure();
+        return;
+      }
+      if (onAdminSessionRestored) onAdminSessionRestored(user);
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
@@ -95,6 +110,7 @@ export const initGoogleSheetsAuth = (
       }
     } else {
       cachedAccessToken = null;
+      if (onAdminSessionRestored) onAdminSessionRestored(null);
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -132,8 +148,15 @@ export interface SignInSheetsResult {
 export const signInForGoogleSheets = async (): Promise<SignInSheetsResult | null> => {
   try {
     isSigningIn = true;
-    provider.setCustomParameters({ prompt: 'consent' });
+    provider.setCustomParameters({ prompt: 'consent', login_hint: ADMIN_OWNER_EMAIL });
     const result = await signInWithPopup(auth, provider);
+
+    if (!isAuthorizedOwner(result.user)) {
+      cachedAccessToken = null;
+      await auth.signOut().catch(() => {});
+      throw new Error('Access Denied: Login is restricted exclusively to the authorized administrator.');
+    }
+
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error('Failed to obtain Google Sheets access token from Google sign-in.');
@@ -178,7 +201,7 @@ export const signInForGoogleSheets = async (): Promise<SignInSheetsResult | null
       syncedCount,
     };
   } catch (error) {
-    console.error('Google Sheets sign-in error:', error);
+    console.warn('Google Sheets sign-in error:', error);
     throw error;
   } finally {
     isSigningIn = false;
