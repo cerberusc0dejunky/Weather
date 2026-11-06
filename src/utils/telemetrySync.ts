@@ -1,6 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, Auth } from 'firebase/auth';
 import {
   NWSAlert,
   RotationPin,
@@ -18,10 +17,38 @@ const MAX_LOCAL_RECORDS = 150;
 
 export const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
-const provider = new GoogleAuthProvider();
-SCOPES.forEach((scope) => provider.addScope(scope));
+const envVars = (import.meta as any).env || {};
+const firebaseApiKey = typeof envVars.VITE_FIREBASE_API_KEY === 'string' ? envVars.VITE_FIREBASE_API_KEY.trim() : '';
+const firebaseProjectId = typeof envVars.VITE_FIREBASE_PROJECT_ID === 'string' ? envVars.VITE_FIREBASE_PROJECT_ID.trim() : '';
+const firebaseAuthDomain =
+  typeof envVars.VITE_FIREBASE_AUTH_DOMAIN === 'string' && envVars.VITE_FIREBASE_AUTH_DOMAIN.trim()
+    ? envVars.VITE_FIREBASE_AUTH_DOMAIN.trim()
+    : firebaseProjectId
+      ? `${firebaseProjectId}.firebaseapp.com`
+      : '';
+const firebaseAppId = typeof envVars.VITE_FIREBASE_APP_ID === 'string' ? envVars.VITE_FIREBASE_APP_ID.trim() : '';
+
+let auth: Auth | null = null;
+let provider: GoogleAuthProvider | null = null;
+
+if (firebaseApiKey && firebaseProjectId) {
+  try {
+    const app =
+      getApps().length === 0
+        ? initializeApp({
+            apiKey: firebaseApiKey,
+            projectId: firebaseProjectId,
+            authDomain: firebaseAuthDomain,
+            appId: firebaseAppId || undefined,
+          })
+        : getApp();
+    auth = getAuth(app);
+    provider = new GoogleAuthProvider();
+    SCOPES.forEach((scope) => provider?.addScope(scope));
+  } catch (e) {
+    console.warn('Firebase Auth initialization skipped:', e);
+  }
+}
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
@@ -108,7 +135,10 @@ export function unlockOwnerAdminLocally(emailInput: string): boolean {
 }
 
 export function getFirebaseAuthSettingsUrl(): string {
-  return `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`;
+  if (firebaseProjectId) {
+    return `https://console.firebase.google.com/project/${firebaseProjectId}/authentication/settings`;
+  }
+  return 'https://console.firebase.google.com/';
 }
 
 export const initGoogleSheetsAuth = (
@@ -116,11 +146,17 @@ export const initGoogleSheetsAuth = (
   onAuthFailure?: () => void,
   onAdminSessionRestored?: (isOwnerAdmin: boolean) => void
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
+  if (!auth) {
+    if (onAdminSessionRestored) onAdminSessionRestored(isOwnerAdminUnlockedLocally());
+    if (onAuthFailure) onAuthFailure();
+    return () => {};
+  }
+  const activeAuth = auth;
+  return onAuthStateChanged(activeAuth, async (user: User | null) => {
     if (user) {
       if (!isAuthorizedOwner(user)) {
         cachedAccessToken = null;
-        await auth.signOut().catch(() => {});
+        await activeAuth.signOut().catch(() => {});
         if (onAdminSessionRestored) onAdminSessionRestored(isOwnerAdminUnlockedLocally());
         if (onAuthFailure) onAuthFailure();
         return;
@@ -173,6 +209,11 @@ export interface SignInSheetsResult {
 }
 
 export const signInForGoogleSheets = async (): Promise<SignInSheetsResult | null> => {
+  if (!auth || !provider) {
+    const err: any = new Error('Firebase Auth is not configured (auth/unauthorized-domain).');
+    err.code = 'auth/unauthorized-domain';
+    throw err;
+  }
   try {
     isSigningIn = true;
     provider.setCustomParameters({ prompt: 'consent', login_hint: ADMIN_OWNER_EMAIL });
@@ -243,7 +284,9 @@ export const signOutGoogleSheets = async () => {
   try {
     localStorage.removeItem(OWNER_ADMIN_SESSION_KEY);
   } catch {}
-  await auth.signOut().catch(() => {});
+  if (auth) {
+    await auth.signOut().catch(() => {});
+  }
   cachedAccessToken = null;
 };
 

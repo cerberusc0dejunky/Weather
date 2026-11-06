@@ -6,7 +6,7 @@ coverage/
 .DS_Store
 *.log
 .env*
-!.env.example
+firebase-applet-config.json
 
 # Scratch files
 update.xml
