@@ -9,7 +9,16 @@ import {
   Tooltip,
 } from 'recharts';
 import SafeResponsiveContainer from './components/SafeResponsiveContainer';
-import { SystemSettings, NWSAlert, LocationAsset, TelemetryConditions, MesoscaleDiscussion, RotationPin, NetworkRequestLog, CorrelationMetricRecord } from './types';
+import {
+  SystemSettings,
+  NWSAlert,
+  LocationAsset,
+  TelemetryConditions,
+  MesoscaleDiscussion,
+  RotationPin,
+  NetworkRequestLog,
+  ConvectiveSoundingMetrics,
+} from './types';
 import {
   getDistance,
   getBearing,
@@ -25,17 +34,12 @@ import {
   parseStormTrajectory,
 } from './utils/geoUtils';
 import {
-  syncAnonymousStormTelemetry,
-  initGoogleSheetsAuth,
-  signInForGoogleSheets,
-  signOutGoogleSheets,
-  getSavedSpreadsheetUrl,
-  getSavedCorrelationRecords,
-  exportCorrelationRecordsCsv,
-  isOwnerAdminUnlockedLocally,
-  unlockOwnerAdminLocally,
-  getFirebaseAuthSettingsUrl,
-} from './utils/telemetrySync';
+  parseSPCValidTimeWindow,
+  extractMDThreatTokens,
+  isMesoscaleDiscussionTemporallyValid,
+  fetchLocalSoundingMetrics,
+  evaluateCompositeTornadoThreat,
+} from './utils/soundingScoringEngine';
 import ThreatCard from './components/ThreatCard';
 import WindGauge from './components/WindGauge';
 import type { ResolvedAlert } from './components/AlertHistory';
@@ -75,8 +79,6 @@ import {
   TrendingUp,
   TrendingDown,
   Cloud,
-  Terminal,
-  Key,
   Bell,
   BellOff,
   Play,
@@ -243,6 +245,9 @@ function parseMesoscaleDiscussion(id: string, issuanceTime: string, text: string
     };
   }
 
+  const { validStartMs, validEndMs } = parseSPCValidTimeWindow(validTime, issuanceTime);
+  const { threatTypes, qualitativeSeverity } = extractMDThreatTokens(text, concerning, peakTornadoIntensity);
+
   return {
     id,
     number,
@@ -250,7 +255,12 @@ function parseMesoscaleDiscussion(id: string, issuanceTime: string, text: string
     areasAffected,
     concerning,
     validTime,
+    validStartMs,
+    validEndMs,
+    isTemporallyActive: true,
     probability,
+    threatTypes,
+    qualitativeSeverity,
     summary,
     text,
     coordinates,
@@ -402,7 +412,6 @@ function App() {
 
   const [alerts, setAlerts] = useState<NWSAlert[]>([]);
   const [showHeadedTowardsOnly, setShowHeadedTowardsOnly] = useState<boolean>(false);
-  const [showMesoscaleCards, setShowMesoscaleCards] = useState<boolean>(false);
   const [stormCoreAddresses, setStormCoreAddresses] = useState<Record<string, string>>({});
   const stormCoreCacheRef = useRef<Record<string, string>>({});
   const [alertHistory, setAlertHistory] = useState<ResolvedAlert[]>(() => {
@@ -435,12 +444,9 @@ function App() {
   };
   const [discussions, setDiscussions] = useState<MesoscaleDiscussion[]>([]);
   const [rawApiDiscussions, setRawApiDiscussions] = useState<MesoscaleDiscussion[]>([]);
-  const [customMDs, setCustomMDs] = useState<MesoscaleDiscussion[]>([]);
   const resolvedStationsRef = useRef<Record<string, string>>({});
-  const [newMDText, setNewMDText] = useState<string>('');
-  const [showMDInputForm, setShowMDInputForm] = useState<boolean>(false);
-  const [expandedMDId, setExpandedMDId] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryConditions | null>(null);
+  const [soundingMetrics, setSoundingMetrics] = useState<ConvectiveSoundingMetrics | null>(null);
   const [windyPointTelemetry, setWindyPointTelemetry] = useState<{
     temp?: string;
     dewpoint?: string;
@@ -482,7 +488,6 @@ function App() {
           vibrate: true,
           flash: true,
           monitorRadius: 25,
-          telemetryDebug: false,
           highContrast: false,
           browserAlerts: false,
           ...JSON.parse(saved),
@@ -494,7 +499,6 @@ function App() {
       vibrate: true,
       flash: true,
       monitorRadius: 25,
-      telemetryDebug: false,
       highContrast: false,
       browserAlerts: false,
     };
@@ -538,94 +542,18 @@ function App() {
     };
   }, [armed]);
 
-  // Owner-only Admin & Google Sheets OAuth state (restricted exclusively to cerberus@c0dejunky.com)
-  const [isAdminUser, setIsAdminUser] = useState<boolean>(() => isOwnerAdminUnlockedLocally());
-  const [sheetsConnected, setSheetsConnected] = useState<boolean>(false);
-  const [sheetsConnecting, setSheetsConnecting] = useState<boolean>(false);
-  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(() => getSavedSpreadsheetUrl());
-  const [sheetsApiError, setSheetsApiError] = useState<string | null>(null);
-  const [sheetsEnableUrl, setSheetsEnableUrl] = useState<string | null>(null);
-  const [unauthorizedDomainModal, setUnauthorizedDomainModal] = useState<string | null>(null);
-  const [ownerEmailInput, setOwnerEmailInput] = useState<string>('');
-  const syncedRotationIdsRef = useRef<Set<string>>(new Set());
-  const syncedMcdIdsRef = useRef<Set<string>>(new Set());
-
+  // Step 3: Fetch and evaluate local sounding metrics (STP, 0-1km SRH, LCL, CAPE/CIN) for the active GPS probe
   useEffect(() => {
-    const unsubscribe = initGoogleSheetsAuth(
-      () => {
-        setIsAdminUser(true);
-        setSheetsConnected(true);
-        setSpreadsheetUrl(getSavedSpreadsheetUrl());
-      },
-      () => {
-        setSheetsConnected(false);
-      },
-      (isOwnerAdmin) => {
-        setIsAdminUser(isOwnerAdmin);
-        if (isOwnerAdmin) {
-          setSpreadsheetUrl(getSavedSpreadsheetUrl());
-        }
+    let cancelled = false;
+    fetchLocalSoundingMetrics(currentLat, currentLon, telemetry, windyPointTelemetry).then((metrics) => {
+      if (!cancelled) {
+        setSoundingMetrics(metrics);
       }
-    );
-    return () => unsubscribe();
-  }, []);
-
-  const handleConnectGoogleSheets = async () => {
-    if (sheetsConnecting) return;
-    setSheetsConnecting(true);
-    setSheetsApiError(null);
-    setSheetsEnableUrl(null);
-    try {
-      const res = await signInForGoogleSheets();
-      if (res) {
-        setIsAdminUser(true);
-        setUnauthorizedDomainModal(null);
-        if (res.apiError) {
-          setSheetsConnected(false);
-          setSheetsApiError(res.apiError);
-          if (res.enableApiUrl) {
-            setSheetsEnableUrl(res.enableApiUrl);
-          }
-          triggerToast(`Google Sheets API: ${res.apiError}`, 'error');
-        } else if (res.spreadsheetUrl) {
-          setSheetsConnected(true);
-          setSpreadsheetUrl(res.spreadsheetUrl);
-          triggerToast(
-            `Admin verified! Google Sheet connected${res.syncedCount ? ` & synced ${res.syncedCount} storm record(s)` : ''}.`,
-            'success'
-          );
-        } else {
-          setSheetsConnected(true);
-          const savedUrl = getSavedSpreadsheetUrl();
-          if (savedUrl) setSpreadsheetUrl(savedUrl);
-        }
-      }
-    } catch (err: any) {
-      const errCode = String(err?.code || '');
-      const errMsg = String(err?.message || '');
-      if (errCode === 'auth/unauthorized-domain' || errMsg.includes('auth/unauthorized-domain')) {
-        const currentDomain = window.location.hostname || window.location.host;
-        setUnauthorizedDomainModal(currentDomain);
-      } else {
-        triggerToast(err?.message || 'Admin Google sign-in was cancelled or denied.', 'error');
-      }
-    } finally {
-      setSheetsConnecting(false);
-    }
-  };
-
-  const handleOwnerDirectUnlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (unlockOwnerAdminLocally(ownerEmailInput)) {
-      setIsAdminUser(true);
-      setSpreadsheetUrl(getSavedSpreadsheetUrl());
-      setUnauthorizedDomainModal(null);
-      setOwnerEmailInput('');
-      triggerToast('Owner Admin controls unlocked for this device.', 'success');
-    } else {
-      triggerToast('Access Denied: Email does not match the authorized owner.', 'error');
-    }
-  };
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentLat, currentLon, telemetry, windyPointTelemetry]);
 
   // Custom user-managed API keys
   const [customPointKey, setCustomPointKey] = useState<string>(() => localStorage.getItem('daisy-windy-point-key') || '');
@@ -899,13 +827,16 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Perform purely local geometric calculations for discussions on coordinate or custom changes without redundant network requests
+  // Step 2: Spatial (Point-in-Polygon & Proximity) and Temporal Indexing of SPC Mesoscale Discussions
   useEffect(() => {
-    // Union of: manually-input discussions + live fetched discussions
-    const allDiscussionsList = [...customMDs, ...rawApiDiscussions];
+    const nowMs = Date.now();
+    // Filter out temporally expired Mesoscale Discussions so stale corridors are automatically purged
+    const temporallyActiveMDs = rawApiDiscussions.filter((md) =>
+      isMesoscaleDiscussionTemporallyValid(md, nowMs)
+    );
 
-    // Re-evaluate distance calculations for the active GPS probe & monitored pins
-    const processedMDs = allDiscussionsList.map((md) => {
+    // Evaluate point-in-polygon and distance calculations for the active GPS probe & monitored pins
+    const processedMDs = temporallyActiveMDs.map((md) => {
       const probeCheck = getParsedPolygonMinDistance(currentLat, currentLon, md.coordinates);
       let minDist = probeCheck.minDist;
       let isIntersecting = probeCheck.isInside;
@@ -922,6 +853,7 @@ function App() {
 
       return {
         ...md,
+        isTemporallyActive: true,
         isIntersecting,
         minDist: minDist === 9999 ? 999 : minDist,
       };
@@ -935,7 +867,7 @@ function App() {
     });
 
     setDiscussions(processedMDs);
-  }, [rawApiDiscussions, customMDs, assets, currentLat, currentLon]);
+  }, [rawApiDiscussions, assets, currentLat, currentLon]);
 
   // Derive Atmospheric stability & Storm Bypass Probability trends based on 6-Hour historical and forecast data
   const forecastTrend = (() => {
@@ -1082,81 +1014,15 @@ function App() {
     };
   })();
 
+  // Step 4: Rule-Based Composite Threat Evaluation (combining active temporally-valid SPC MCDs + STP + 0-1km SRH + LCL + CAPE/CIN)
+  const compositeThreat = evaluateCompositeTornadoThreat(
+    discussions,
+    soundingMetrics,
+    settings.monitorRadius
+  );
+
   const rawNwsFeaturesRef = useRef<any[]>([]);
   const pointDirectHitIdsRef = useRef<Set<string>>(new Set());
-
-  // Silent Background Correlation Sync:
-  // 1) Immediately capture & sync all storm, ASOS, CAPE, and MCD metrics whenever a new RotationPin is detected.
-  // 2) Capture & sync SPC Mesoscale Discussion (LAT/LON watch corridor + intensity metrics) when newly issued or sampled periodically.
-  // Strict Privacy: Zero user GPS coordinates or personal location names are ever included.
-  useEffect(() => {
-    if (!armed) return;
-
-    rotationPins.forEach((pin) => {
-      if (!syncedRotationIdsRef.current.has(pin.id)) {
-        syncedRotationIdsRef.current.add(pin.id);
-        const matchedAlert = alerts.find((a) => a.id === pin.alertId) || null;
-        syncAnonymousStormTelemetry({
-          triggerType:
-            pin.pinType === 'vortex' || pin.pinType === 'radar_indicated'
-              ? 'TORNADO_WARNING_ACTIVE'
-              : 'ROTATION_DETECTED',
-          pin,
-          alert: matchedAlert,
-          discussions,
-          telemetry,
-          windyTelemetry: windyPointTelemetry,
-          forecastTrend,
-        }).then(() => {
-          setSpreadsheetUrl(getSavedSpreadsheetUrl());
-        });
-      }
-    });
-  }, [rotationPins, armed, alerts, discussions, telemetry, windyPointTelemetry, forecastTrend, sheetsConnected]);
-
-  useEffect(() => {
-    if (!armed || discussions.length === 0) return;
-
-    // Log newly discovered Mesoscale Discussions so we capture their LAT...LON watch corridors for later tornado correlation
-    discussions.forEach((md) => {
-      const mcdSyncKey = `mcd-${md.number}-${md.issuanceTime}`;
-      if (!syncedMcdIdsRef.current.has(mcdSyncKey) && md.coordinates.length > 0) {
-        syncedMcdIdsRef.current.add(mcdSyncKey);
-        syncAnonymousStormTelemetry({
-          triggerType: 'MESOSCALE_CORRELATION_SAMPLE',
-          pin: rotationPins[0] || null,
-          alert: alerts[0] || null,
-          discussions,
-          targetMcd: md,
-          telemetry,
-          windyTelemetry: windyPointTelemetry,
-          forecastTrend,
-        }).then(() => {
-          setSpreadsheetUrl(getSavedSpreadsheetUrl());
-        });
-      }
-    });
-
-    // Periodic 15-minute background sample while Mesoscale Discussions or Rotation Pins are active
-    const sampleInterval = setInterval(() => {
-      if (discussions.length > 0 || rotationPins.length > 0) {
-        syncAnonymousStormTelemetry({
-          triggerType: rotationPins.length > 0 ? 'ROTATION_DETECTED' : 'MESOSCALE_CORRELATION_SAMPLE',
-          pin: rotationPins[0] || null,
-          alert: alerts[0] || null,
-          discussions,
-          targetMcd: discussions[0] || null,
-          telemetry,
-          windyTelemetry: windyPointTelemetry,
-          forecastTrend,
-        }).then(() => {
-          setSpreadsheetUrl(getSavedSpreadsheetUrl());
-        });
-      }
-    }, 15 * 60 * 1000);
-
-    return () => clearInterval(sampleInterval);
-  }, [armed, discussions, rotationPins, alerts, telemetry, windyPointTelemetry, forecastTrend, sheetsConnected]);
 
   // Core NWS Alert Acquisition Engine (Layer 1 The Alarm)
   const fetchNationalAlerts = async () => {
@@ -1486,8 +1352,9 @@ function App() {
                                          fullText.includes('TORNADO DEBRIS') || 
                                          fullText.includes('TDS');
 
-      // 5. Compute Advanced Tornado Predictive Confidence Score
+      // 5. Compute Advanced Tornado Predictive Confidence Score + Step 4 SPC MD & Local Sounding Calibration
       let predictedTornadoConfidence = 0;
+      let soundingScenarioSummary: string | undefined = undefined;
       const isTornadoEvent = eventName.toUpperCase().includes('TORNADO');
       const isSevereThunderstorm = eventName.toUpperCase().includes('THUNDERSTORM');
 
@@ -1507,10 +1374,42 @@ function App() {
           predictedTornadoConfidence += 30; // Tracks directly into environmental instability gradients
         }
       }
+
+      // Calibrate with Step 4 Rule-Based Heuristic Scoring Engine (MD Watch Probability + STP + 0-1km SRH + LCL + CIN)
+      if (!tornadoDebrisSignatureTDS && !hasObserved) {
+        if (compositeThreat.scenario === 'HIGH_CONFIDENCE_TORNADO') {
+          predictedTornadoConfidence = Math.max(
+            predictedTornadoConfidence,
+            Math.round(Math.max(82, compositeThreat.threatScore))
+          );
+          soundingScenarioSummary = `${compositeThreat.scenarioLabel}: ${compositeThreat.scenarioReasoning}`;
+        } else if (compositeThreat.scenario === 'CONDITIONAL_CAPPED') {
+          if (!isTornadoEvent) {
+            predictedTornadoConfidence = Math.min(predictedTornadoConfidence, 45);
+          }
+          soundingScenarioSummary = `${compositeThreat.scenarioLabel}: ${compositeThreat.scenarioReasoning}`;
+        } else if (compositeThreat.scenario === 'WIND_HAIL_DOMINATED') {
+          // Null Tornadic Scenario: Location is inside MD or storm, but local STP & 0-1km SRH fail tornadic thresholds
+          if (!isTornadoEvent) {
+            predictedTornadoConfidence = Math.min(predictedTornadoConfidence, 20);
+          } else {
+            predictedTornadoConfidence = Math.max(35, predictedTornadoConfidence - 15);
+          }
+          soundingScenarioSummary = `${compositeThreat.scenarioLabel}: ${compositeThreat.scenarioReasoning}`;
+        } else if (soundingMetrics) {
+          soundingScenarioSummary = `${compositeThreat.scenarioLabel}: ${compositeThreat.scenarioReasoning}`;
+        }
+      } else if (soundingMetrics) {
+        soundingScenarioSummary = `${compositeThreat.scenarioLabel}: ${compositeThreat.scenarioReasoning}`;
+      }
+
       predictedTornadoConfidence = Math.min(100, Math.max(0, predictedTornadoConfidence));
 
       // 6. Issue automated early localized trigger warnings on high-value hazard threats
-      if (convectiveIntensificationDetected && velocityCoupletPersistentShear && !isTornadoEvent) {
+      if (
+        (convectiveIntensificationDetected && velocityCoupletPersistentShear && !isTornadoEvent && compositeThreat.scenario !== 'WIND_HAIL_DOMINATED') ||
+        (compositeThreat.scenario === 'HIGH_CONFIDENCE_TORNADO' && isSevereThunderstorm)
+      ) {
         triggerToast(
           `AUTOMATED PREDICTIVE WARNING: Severe convective cell tracking directly into extreme local instability. Early tornadic intensification predicted downstream.`,
           'error'
@@ -1828,6 +1727,7 @@ function App() {
         threatLevel: calculatedThreatLevel,
         // Advanced Internal Prediction properties
         predictedTornadoConfidence,
+        soundingScenarioSummary,
         strongSupercellUpdraft,
         tornadoDamageThreatOnGround,
         polygonCentroidShiftVector,
@@ -1932,12 +1832,12 @@ function App() {
     };
   }, [alerts]);
 
-  // Re-evaluate active NWS features whenever monitored assets, monitorRadius, or current position changes
+  // Re-evaluate active NWS features whenever monitored assets, monitorRadius, current position, or sounding/MD state changes
   useEffect(() => {
     if (rawNwsFeaturesRef.current.length > 0) {
       processNWSFeatures(rawNwsFeaturesRef.current);
     }
-  }, [assets, settings.monitorRadius, currentLat, currentLon]);
+  }, [assets, settings.monitorRadius, currentLat, currentLon, soundingMetrics, discussions]);
 
   // Core SPC Mesoscale Discussions Acquisition Engine
   // NWS publishes SPC Mesoscale Discussions under product type 'SWO' with wmoCollectiveId 'ACUS11' (SWOMCD),
@@ -2062,14 +1962,6 @@ function App() {
     };
 
     try {
-      if (settings.telemetryDebug) {
-        console.log('[Telemetry Debug] Initiating Windy Forecast Query', {
-          timestamp: new Date().toISOString(),
-          endpoint: url,
-          requestPayload: body
-        });
-      }
-
       let res = await fetch(url, {
         method: 'POST',
         headers: reqHeaders,
@@ -2080,14 +1972,6 @@ function App() {
       if (!res.ok && model !== 'gfs') {
         const errTxt = await res.clone().text().catch(() => '');
         console.warn(`Windy API model '${model}' rejected (Status ${res.status}: ${errTxt}). Falling back to 'gfs'...`);
-        
-        if (settings.telemetryDebug) {
-          console.warn('[Telemetry Debug] Model specific request failed, falling back to gfs', {
-            timestamp: new Date().toISOString(),
-            status: res.status,
-            error: errTxt
-          });
-        }
 
         // Track this model fallback in networkLogs
         logNetworkRequest({
@@ -2111,30 +1995,7 @@ function App() {
 
       if (!res.ok) {
         const errText = await res.text().catch(() => 'No further details provided');
-        
         const is400 = res.status === 400;
-        let suggestion = '';
-        if (is400) {
-          suggestion = `Your Windy API key may lack point-forecast privileges or permission for active model '${model}'. Ensure key has appropriate subscriptions on Windy portal.`;
-          
-          // Explicitly log the full request URL and headers whenever a 400 error occurs
-          console.warn('[Telemetry 400 Bad Request Warning]', {
-            timestamp: new Date().toISOString(),
-            status: res.status,
-            url: url,
-            headers: reqHeaders,
-            payload: body,
-            responseError: errText
-          });
-        } else {
-          if (settings.telemetryDebug) {
-            console.warn('[Telemetry Debug] Windy Forecast Query Failed', {
-              timestamp: new Date().toISOString(),
-              status: res.status,
-              error: errText
-            });
-          }
-        }
 
         logNetworkRequest({
           service: 'Windy',
@@ -2180,14 +2041,6 @@ function App() {
           'model-requested': model
         }
       });
-
-      if (settings.telemetryDebug) {
-        console.log('[Telemetry Debug] Windy Forecast Query Successful', {
-          timestamp: new Date().toISOString(),
-          responseStatus: res.status,
-          responsePayload: data
-        });
-      }
       
       if (data && data.ts && data.ts.length > 0) {
         const nowMs = Date.now();
@@ -2315,12 +2168,6 @@ function App() {
       }
     } catch (err: any) {
       console.warn('Silent fallback: Windy Point Forecast API query failed', err);
-      if (settings.telemetryDebug) {
-        console.warn('[Telemetry Debug] Caught Windy Point Forecast service error', {
-          timestamp: new Date().toISOString(),
-          error: err?.message || String(err)
-        });
-      }
       setWindyPointTelemetry(null);
     } finally {
       setWindyPointLoading(false);
@@ -2726,16 +2573,6 @@ function App() {
     } catch {}
   };
 
-  const handleAddCustomMD = (inputText: string) => {
-    if (!inputText.trim()) return;
-    try {
-      const parsed = parseMesoscaleDiscussion(`custom-${Date.now()}`, new Date().toISOString(), inputText);
-      setCustomMDs((prev) => [parsed, ...prev]);
-    } catch (e) {
-      console.warn('Coordinates parsing error:', e);
-      triggerToast('Error: LAT...LON coordinate block not detected or improperly formatted in custom text.', 'error');
-    }
-  };
 
   // Engaging Gateway
   const handleArmActivation = () => {
@@ -2899,20 +2736,6 @@ function App() {
     }
   };
 
-  const handleFocusMD = (md: MesoscaleDiscussion) => {
-    if (md.coordinates && md.coordinates.length > 0) {
-      // Compute coordinates centroid to center map view nicely
-      const lats = md.coordinates.map((c) => c.lat);
-      const lons = md.coordinates.map((c) => c.lon);
-      const avgLat = lats.reduce((a, b) => a + b, 0) / lats.length;
-      const avgLon = lons.reduce((a, b) => a + b, 0) / lons.length;
-
-      setCurrentLat(avgLat);
-      setCurrentLon(avgLon);
-      setMapMode('radar');
-    }
-  };
-
   // Only flash the screen and display the critical warning banner when an active NWS alert (not a Watch)
   // in the user's proximity/zone mentions one of the tornado trigger words.
   const isAnyDirectHitWarningActive = alerts.some((a) => {
@@ -2929,10 +2752,6 @@ function App() {
     return (a.isDirectHit || a.minDist <= settings.monitorRadius) && hasTornadoTrigger;
   });
 
-  const activeIntersectingMD = discussions.find(
-    (d) => d.isIntersecting && d.probability >= 40
-  );
-
   return (
     <main className={`min-h-screen flex flex-col text-slate-900 dark:text-slate-100 ${settings.flash && isAnyDirectHitWarningActive ? 'flash-active-severe' : 'bg-slate-50 dark:bg-slate-950'} transition-colors duration-300`}>
       {/* Geolocation Modal Engagement */}
@@ -2940,106 +2759,6 @@ function App() {
         <Suspense fallback={null}>
           <GeolocationModal onAccept={handleLocationAccept} onDecline={handleLocationDecline} />
         </Suspense>
-      )}
-
-      {/* Owner Admin Unlock & Firebase Authorized Domain Modal */}
-      {unauthorizedDomainModal && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-[420] flex items-center justify-center p-6">
-          <div className="bg-slate-900 border border-cyan-500/40 rounded-3xl p-6 max-w-lg w-full shadow-[0_0_30px_rgba(34,211,238,0.25)] text-white space-y-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/40 flex items-center justify-center text-neon-aqua">
-                  <Key className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-base font-black uppercase tracking-wider text-white">
-                    Owner Admin Verification
-                  </h2>
-                  <p className="text-[11px] text-slate-400">
-                    Unlock Admin Controls or authorize this domain for Google Sheets OAuth
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setUnauthorizedDomainModal(null)}
-                className="text-slate-400 hover:text-white text-lg font-bold px-2 cursor-pointer"
-                aria-label="Close modal"
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Option 1: Instant Owner Unlock for CSV Download & Admin Controls */}
-            <form onSubmit={handleOwnerDirectUnlock} className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
-              <div className="text-[11px] font-black uppercase tracking-wider text-cyan-400">
-                1. Instant Owner Admin Unlock (CSV Log & Controls)
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Enter your administrator email address to immediately unlock the <strong className="text-white">Download Log (.CSV)</strong> and Google Sheet controls on this device:
-              </p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="email"
-                  value={ownerEmailInput}
-                  onChange={(e) => setOwnerEmailInput(e.target.value)}
-                  placeholder="Enter owner administrator email..."
-                  className="flex-1 bg-slate-900 border border-slate-700 focus:border-neon-aqua rounded-xl px-3.5 py-2.5 text-xs text-white font-mono outline-none"
-                  required
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black uppercase text-xs tracking-wider rounded-xl cursor-pointer transition-all shrink-0"
-                >
-                  Unlock Admin
-                </button>
-              </div>
-            </form>
-
-            {/* Option 2: Whitelist Current Domain in Firebase Auth for Google Popup */}
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 space-y-3">
-              <div className="text-[11px] font-black uppercase tracking-wider text-amber-400">
-                2. Authorize Domain for Google Sheets OAuth Popup
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                Firebase blocked the Google OAuth popup because <code className="text-amber-300 font-mono bg-slate-950 px-1.5 py-0.5 rounded">{unauthorizedDomainModal}</code> is not yet listed in your Firebase project&apos;s <strong className="text-white">Authorized domains</strong>.
-              </p>
-              <div className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
-                <code className="text-xs font-mono text-neon-aqua truncate">{unauthorizedDomainModal}</code>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(unauthorizedDomainModal);
-                    triggerToast(`Copied domain: ${unauthorizedDomainModal}`, 'success');
-                  }}
-                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer shrink-0"
-                >
-                  Copy Domain
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <a
-                  href={getFirebaseAuthSettingsUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black uppercase text-[10px] tracking-wider rounded-xl transition-all"
-                >
-                  Open Firebase Auth Settings ↗
-                </a>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUnauthorizedDomainModal(null);
-                    handleConnectGoogleSheets();
-                  }}
-                  className="px-3.5 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 font-black uppercase text-[10px] tracking-wider rounded-xl cursor-pointer transition-all"
-                >
-                  Retry Google Popup Sign-In
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* PWA Saved/Install Guide Modal */}
@@ -3366,112 +3085,8 @@ function App() {
                   <Download className="w-3.5 h-3.5" /> Install DAISY
                 </button>
               )}
-
-              {/* Owner-Only Admin Controls: Google Sheets Auto-Sync & CSV Log are strictly hidden unless cerberus@c0dejunky.com is logged in */}
-              {!isAdminUser ? (
-                <button
-                  id="admin-owner-login-btn"
-                  type="button"
-                  onClick={handleConnectGoogleSheets}
-                  disabled={sheetsConnecting}
-                  className="px-3.5 py-2.5 bg-slate-100/70 dark:bg-slate-900/70 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-neon-aqua border border-slate-300/70 dark:border-slate-800 rounded-full text-[9.5px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
-                  title="Owner-only administrator sign-in"
-                >
-                  <Key className="w-3 h-3" />
-                  <span>{sheetsConnecting ? 'Verifying...' : 'Admin'}</span>
-                </button>
-              ) : (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {spreadsheetUrl && (
-                    <a
-                      href={spreadsheetUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 rounded-full text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5"
-                      title="Open your DAISY Storm Rotation & Mesoscale Correlation Log in Google Sheets"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      Open Auto-Sync Google Sheet ↗
-                    </a>
-                  )}
-                  {!sheetsConnected && (
-                    <button
-                      id="google-sheets-signin-btn"
-                      type="button"
-                      onClick={handleConnectGoogleSheets}
-                      disabled={sheetsConnecting}
-                      className="px-4 py-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/50 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
-                      title="Sync captured storm rotation & mesoscale data to your Google Sheet"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <span>{sheetsConnecting ? 'Syncing Sheet...' : spreadsheetUrl ? 'Sync Google Sheet Now' : 'Auto-Sync Google Sheet'}</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const ok = exportCorrelationRecordsCsv();
-                      if (ok) {
-                        triggerToast(`Exported ${getSavedCorrelationRecords().length} captured storm rotation & mesoscale record(s) to CSV.`, 'success');
-                      } else {
-                        triggerToast('No storm rotation or mesoscale correlation records captured yet.', 'info');
-                      }
-                    }}
-                    className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:border-cyan-500 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5"
-                    title="Download all locally captured rotation & mesoscale correlation records as a spreadsheet (.CSV)"
-                  >
-                    <Download className="w-3.5 h-3.5 text-cyan-500" />
-                    Download Log (.CSV)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      signOutGoogleSheets();
-                      setIsAdminUser(false);
-                      setSheetsConnected(false);
-                      triggerToast('Signed out of Admin telemetry controls.', 'info');
-                    }}
-                    className="px-2.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-rose-500/10 text-slate-500 hover:text-rose-500 border border-slate-300 dark:border-slate-700 rounded-full text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
-                    title="Sign out and hide admin telemetry controls"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-              )}
             </div>
           </div>
-
-          {isAdminUser && sheetsApiError && (
-            <div className="bg-amber-500/10 border border-amber-500/40 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-              <div className="space-y-0.5">
-                <div className="font-black uppercase text-amber-500 text-[10px] tracking-wider">
-                  Google Sheets API Action Needed
-                </div>
-                <p className="text-slate-700 dark:text-slate-300 text-[11px] leading-snug">
-                  {sheetsApiError}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {sheetsEnableUrl && (
-                  <a
-                    href={sheetsEnableUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black uppercase text-[10px] rounded-xl tracking-wider transition-all"
-                  >
-                    1. Enable Sheets API in Cloud Console ↗
-                  </a>
-                )}
-                <button
-                  type="button"
-                  onClick={handleConnectGoogleSheets}
-                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase text-[10px] rounded-xl tracking-wider cursor-pointer transition-all"
-                >
-                  {sheetsEnableUrl ? '2. Retry Create Sheet' : 'Retry Create Sheet'}
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Settings / Controls Strip */}
           <div className="border-t border-slate-200 dark:border-slate-800/80 pt-5 flex flex-col md:flex-row justify-between items-center gap-4 transition-colors">
@@ -3518,21 +3133,6 @@ function App() {
                 <span className="flex items-center gap-1">
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-500 dark:text-white" />
                   Strobe Flash
-                </span>
-              </label>
-
-              <label className="flex items-center gap-2 text-[10px] font-black uppercase cursor-pointer tracking-wider select-none text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  id="settings-telemetry-debug"
-                  name="telemetryDebugToggle"
-                  checked={settings.telemetryDebug || false}
-                  onChange={(e) => setSettings((s) => ({ ...s, telemetryDebug: e.target.checked }))}
-                  className="w-4 h-4 accent-indigo-600 dark:accent-indigo-400 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded focus:ring-0 cursor-pointer"
-                />
-                <span className="flex items-center gap-1">
-                  <Terminal className="w-3.5 h-3.5 text-indigo-500" />
-                  Telemetry Debug
                 </span>
               </label>
 
@@ -4054,7 +3654,7 @@ function App() {
               Active Proximity Alerts
             </h2>
             
-            {/* Filter Toggle for storm motion, impact trajectory, and Mesoscale Discussion cards (hidden by default) */}
+            {/* Filter Toggle for storm motion and impact trajectory */}
             <div className="flex flex-wrap bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800/80 self-stretch sm:self-auto gap-1">
               <button
                 id="show-all-threats-btn"
@@ -4079,21 +3679,6 @@ function App() {
                 }`}
               >
                 Headed Towards Me ({alerts.filter((a) => a.headedTowards || a.isDirectHit).length})
-              </button>
-              <button
-                id="toggle-mesoscale-cards-btn"
-                type="button"
-                onClick={() => setShowMesoscaleCards((prev) => !prev)}
-                className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer ${
-                  showMesoscaleCards
-                    ? 'bg-amber-500 text-slate-950 shadow-[0_2px_8px_rgba(245,158,11,0.3)]'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-amber-500 dark:hover:text-amber-400'
-                }`}
-              >
-                <Activity className="w-3.5 h-3.5" />
-                {showMesoscaleCards
-                  ? `Hide Mesoscale Cards (${discussions.length})`
-                  : `Mesoscale Discussions (${discussions.length})`}
               </button>
             </div>
           </div>
@@ -4161,205 +3746,6 @@ function App() {
             />
           </Suspense>
         </div>
-
-        {/* SPC Mesoscale Discussions Listings Section (Hidden by default until toggled via Filter Bar) */}
-        {showMesoscaleCards && (
-        <section className="mt-8 flex flex-col gap-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-            <h2 className="text-xl md:text-2xl font-black text-slate-800 dark:text-white font-sans tracking-wide uppercase flex items-center gap-2">
-              <Activity className="w-6 h-6 text-amber-500 dark:text-amber-400 animate-pulse" />
-              SPC Mesoscale Convective Discussions
-            </h2>
-            
-            <button
-              onClick={() => setShowMDInputForm(!showMDInputForm)}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 hover:border-amber-500 rounded-full text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer font-sans"
-            >
-              {showMDInputForm ? 'Close Input Panel' : 'Feed Custom SPC Text'}
-            </button>
-          </div>
-
-          {/* Collapsible custom input board */}
-          {showMDInputForm && (
-            <div className="bg-white dark:bg-slate-900 border border-amber-500/30 rounded-3xl p-5 shadow-inner transition-all">
-              <h3 className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 font-sans tracking-wide mb-2">
-                Manual Forecast Segment Direct Infiltration (MCD Parser)
-              </h3>
-              <p className="text-[10px] text-slate-600 mb-4 font-semibold uppercase tracking-wider">
-                Paste the full SPC Mesoscale Discussion raw text below (must contain the "LAT...LON" block at the end).
-              </p>
-              
-              <textarea
-                id="newMDText"
-                name="newMDText"
-                value={newMDText}
-                onChange={(e) => setNewMDText(e.target.value)}
-                placeholder="Mesoscale Discussion 1014... \n\n LAT...LON   34079493 34539504 ..."
-                rows={8}
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-700 font-mono text-xs p-4 rounded-2xl focus:border-amber-500 focus:ring-0 outline-none"
-              />
-              
-              <div className="flex justify-end gap-3 mt-4">
-                <button
-                  onClick={() => {
-                    handleAddCustomMD(newMDText);
-                    setNewMDText('');
-                    setShowMDInputForm(false);
-                  }}
-                  className="px-4 py-2 bg-amber-500 text-slate-950 hover:bg-amber-400 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
-                >
-                  Parse & Overlay Corridor
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Discussions Cards Deck */}
-          {discussions.length === 0 ? (
-            <div className="bg-white dark:bg-slate-900/10 border-2 border-dashed border-slate-200 dark:border-slate-800/85 rounded-3xl p-10 text-center shadow-sm">
-              <p className="text-slate-600 dark:text-slate-400 font-bold text-xs uppercase tracking-widest leading-relaxed">
-                No Active SPC Mesoscale Discussions Currently Issued By NOAA Storm Prediction Center
-              </p>
-              <p className="text-[10px] font-mono text-slate-500 mt-1">
-                Polling NWS SWO (ACUS11 / SWOMCD) &amp; NOAA SPC live feeds every 60s for new watch corridors.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {discussions.map((md) => {
-                const isExpanded = expandedMDId === md.id;
-                
-                // Color mapping for watch issuance probability
-                let probColorClass = 'text-green-500 border-green-200 bg-green-50/50 dark:bg-green-950/10 dark:border-green-950/10';
-                if (md.probability >= 70) {
-                  probColorClass = 'text-red-500 border-red-200 bg-red-50/50 dark:bg-red-950/10 dark:border-red-950/10';
-                } else if (md.probability >= 40) {
-                  probColorClass = 'text-amber-500 border-amber-200 bg-amber-50/50 dark:bg-amber-950/10 dark:border-amber-950/10';
-                }
-                
-                return (
-                  <div
-                    key={md.id}
-                    className={`bg-white dark:bg-slate-900 border ${
-                      md.isIntersecting
-                        ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/30'
-                        : 'border-slate-200 dark:border-slate-800/80'
-                    } rounded-3xl p-6 flex flex-col justify-between transition-all`}
-                  >
-                    <div>
-                      {/* Top Meta info */}
-                      <div className="flex justify-between items-start gap-4">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[9px] font-black uppercase rounded">
-                              SPC MCD #{md.number}
-                            </span>
-                            {md.isIntersecting && (
-                              <span className="px-2 py-0.5 bg-rose-600 text-white text-[9px] font-black uppercase rounded animate-pulse">
-                                Intersects base
-                              </span>
-                            )}
-                          </div>
-                          <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase font-sans tracking-tight mt-2 leading-none">
-                            MCD #{md.number} — {md.concerning}
-                          </h3>
-                        </div>
-                        
-                        <div className={`px-3 py-1.5 border rounded-xl text-center flex flex-col items-center justify-center shrink-0 ${probColorClass}`}>
-                          <span className="text-[14px] font-black font-sans leading-none">{md.probability}%</span>
-                          <span className="text-[7px] font-bold uppercase tracking-widest mt-0.5">Watch Probability</span>
-                        </div>
-                      </div>
-
-                      {/* Sub details */}
-                      <div className="space-y-1.5 mt-4">
-                        <div className="flex items-start gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
-                          <span className="font-bold text-slate-700 dark:text-slate-300 shrink-0">Affecting:</span>
-                          <span>{md.areasAffected}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
-                          <span className="font-bold text-slate-700 dark:text-slate-300">Valid:</span>
-                          <span>{md.validTime}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
-                          <span className="font-bold text-slate-700 dark:text-slate-300">Proximity:</span>
-                          <span className={md.isIntersecting ? 'text-red-500 font-extrabold' : ''}>
-                            {md.isIntersecting ? 'Direct Grid Overlapping' : `${md.minDist.toFixed(1)} miles away`}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Target Watch Area LAT/LON Corridor & Peak Intensity Metrics */}
-                      {md.watchBox && md.centroid && (
-                        <div className="mt-4 p-3.5 rounded-2xl bg-amber-500/5 border border-amber-500/20 font-mono text-[10px] space-y-1.5">
-                          <div className="font-black uppercase text-amber-600 dark:text-amber-400 flex items-center justify-between">
-                            <span>Most Likely Watch Corridor (LAT / LON)</span>
-                            <span>{md.coordinates.length} Vertices</span>
-                          </div>
-                          <div className="text-slate-700 dark:text-slate-300 font-bold">
-                            LAT: {md.watchBox.minLat.toFixed(2)}°N to {md.watchBox.maxLat.toFixed(2)}°N &nbsp;|&nbsp; LON: {md.watchBox.minLon.toFixed(2)}°W to {md.watchBox.maxLon.toFixed(2)}°W
-                          </div>
-                          <div className="text-slate-500 dark:text-slate-400">
-                            Corridor Centroid: {md.centroid.lat.toFixed(3)}°N, {md.centroid.lon.toFixed(3)}°W
-                            {md.wfoList && md.wfoList.length > 0 ? ` • WFOs: ${md.wfoList.join(', ')}` : ''}
-                          </div>
-                          {(md.peakTornadoIntensity || md.peakWindGust || md.peakHailSize) && (
-                            <div className="pt-1.5 border-t border-amber-500/20 flex flex-wrap gap-2">
-                              {md.peakTornadoIntensity && (
-                                <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 font-black">
-                                  PEAK TORNADO: {md.peakTornadoIntensity}
-                                </span>
-                              )}
-                              {md.peakWindGust && (
-                                <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-neon-aqua font-black">
-                                  PEAK WIND: {md.peakWindGust}
-                                </span>
-                              )}
-                              {md.peakHailSize && (
-                                <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-300 font-black">
-                                  PEAK HAIL: {md.peakHailSize}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Summary Paragraph */}
-                      <p className="mt-4 text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-950 p-4 border border-slate-200 dark:border-slate-800/60 rounded-2xl">
-                        {md.summary}
-                      </p>
-
-                      {/* Collapsible raw text block */}
-                      {isExpanded && (
-                        <div className="mt-4 bg-slate-950 text-slate-200 border border-slate-800/80 text-[10px] p-4 rounded-2xl font-mono whitespace-pre-wrap max-h-[220px] overflow-y-auto leading-relaxed uppercase tracking-wider">
-                          {md.text}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Bottom Action strip */}
-                    <div className="flex items-center gap-3 mt-6 border-t border-slate-100 dark:border-slate-800/80 pt-4 shrink-0">
-                      <button
-                        onClick={() => handleFocusMD(md)}
-                        className="px-4 py-2 flex-1 bg-slate-950 text-amber-500 border border-slate-800 hover:border-amber-500 hover:text-amber-400 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors cursor-pointer text-center"
-                      >
-                        Locate Corridor
-                      </button>
-                      <button
-                        onClick={() => setExpandedMDId(isExpanded ? null : md.id)}
-                        className="px-4 py-2 flex-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:text-slate-900 dark:hover:text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors cursor-pointer text-center"
-                      >
-                        {isExpanded ? 'Hide Details' : 'Read Full Text'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-        )}
       </div>
     </main>
   );

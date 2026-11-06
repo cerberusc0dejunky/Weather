@@ -215,6 +215,24 @@ export default function ThreatCard({ alert, hasAssets, onViewTrajectory }: Threa
           </span>
         </div>
 
+        {/* Tornado Confidence Readout (calibrated in background by Sounding & SPC Mesoscale engine) */}
+        {alert.predictedTornadoConfidence !== undefined && (
+          <div className="mt-3 px-3.5 py-2 bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-between text-[10px] font-bold uppercase tracking-wider font-mono">
+            <span className="text-slate-500 dark:text-slate-400">Tornado Confidence</span>
+            <span
+              className={
+                alert.predictedTornadoConfidence >= 70
+                  ? 'text-rose-600 dark:text-rose-400 font-black'
+                  : alert.predictedTornadoConfidence >= 40
+                  ? 'text-amber-600 dark:text-amber-400 font-black'
+                  : 'text-teal-600 dark:text-teal-400 font-black'
+              }
+            >
+              {alert.predictedTornadoConfidence}%
+            </span>
+          </div>
+        )}
+
         {/* High-Detail Radar Pinpoint, Reverse-Geocoded Street/Highway Corridor & Pathcast */}
         {(stormCoreAddress || radarLocationHeadline || impactedLocations || maxWindHailTag) && (
           <div className="mt-4 p-3.5 bg-cyan-950/10 dark:bg-slate-950/90 border border-cyan-500/30 dark:border-cyan-500/30 rounded-xl space-y-2 transition-colors">

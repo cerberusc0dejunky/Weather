@@ -55,6 +55,7 @@ export interface NWSAlert {
   velocityCoupletPersistentShear?: boolean; // Radar shear signature
   hookEchoEvolutionDetected?: boolean; // Reflectivity hook-echo shape
   tornadoDebrisSignatureTDS?: boolean; // Dual-pol TDS signature
+  soundingScenarioSummary?: string; // Step 4 composite MD + sounding verification note
 }
 
 export interface TelemetryConditions {
@@ -78,7 +79,6 @@ export interface SystemSettings {
   vibrate: boolean;
   flash: boolean;
   monitorRadius: number;
-  telemetryDebug?: boolean;
   highContrast?: boolean;
   browserAlerts?: boolean;
 }
@@ -90,7 +90,16 @@ export interface MesoscaleDiscussion {
   areasAffected: string;
   concerning: string;
   validTime: string;
+  validStartMs?: number | null;
+  validEndMs?: number | null;
+  isTemporallyActive?: boolean;
   probability: number;
+  threatTypes?: {
+    tornado: boolean;
+    wind: boolean;
+    hail: boolean;
+  };
+  qualitativeSeverity?: 'PDS' | 'STRONG_TORNADO' | 'CONDITIONAL' | 'STANDARD';
   summary: string;
   text: string;
   coordinates: { lat: number; lon: number }[];
@@ -107,6 +116,37 @@ export interface MesoscaleDiscussion {
   peakHailSize?: string;
   isIntersecting: boolean;
   minDist: number;
+}
+
+export interface ConvectiveSoundingMetrics {
+  sbcape: number; // J/kg
+  cin: number; // J/kg (convective inhibition magnitude, >= 0)
+  lclMeters: number; // Lifted Condensation Level height (m AGL)
+  srh01km: number; // 0-1 km Storm-Relative Helicity (m^2/s^2)
+  bulkShear06kmMph: number; // 0-6 km Bulk Wind Shear (mph)
+  stp: number; // Significant Tornado Parameter (composite index)
+  updatedAt: string;
+}
+
+export type TornadicRegimeScenario =
+  | 'HIGH_CONFIDENCE_TORNADO'
+  | 'CONDITIONAL_CAPPED'
+  | 'WIND_HAIL_DOMINATED'
+  | 'SUB_SEVERE';
+
+export interface CompositeThreatEvaluation {
+  threatScore: number; // 0 - 100 weighted heuristic score
+  scenario: TornadicRegimeScenario;
+  scenarioLabel: string;
+  scenarioReasoning: string;
+  activeMdNumber: string | null;
+  activeMdWatchProb: number;
+  activeMdTemporallyValid: boolean;
+  activeMdInsidePolygon: boolean;
+  stpScore: number;
+  srhScore: number;
+  suppressTornadoWarning: boolean;
+  elevateTornadoAlert: boolean;
 }
 
 export interface RotationPin {
@@ -134,63 +174,3 @@ export interface NetworkRequestLog {
   error?: string;
   suggestedAction?: string;
 }
-
-export interface CorrelationMetricRecord {
-  recordId: string;
-  capturedAt: string;
-  triggerType: 'ROTATION_DETECTED' | 'MESOSCALE_CORRELATION_SAMPLE' | 'TORNADO_WARNING_ACTIVE';
-  // Storm & Rotation Metrics (Strictly Storm Polygon Coordinates - Zero User PII)
-  alertId: string;
-  event: string;
-  rotationType: 'vortex' | 'radar_indicated' | 'mesocyclone' | 'none';
-  threatLevel: string;
-  stormCentroidLat: number | null;
-  stormCentroidLon: number | null;
-  stormAreaDesc: string;
-  stormVectorDir: string | null;
-  stormVectorSpeedMph: number | null;
-  polygonShiftDir: string | null;
-  polygonShiftSpeedMph: number | null;
-  predictedTornadoConfidence: number;
-  hasTDS: boolean;
-  hasObservedTornado: boolean;
-  hasVelocityCouplet: boolean;
-  hasHookEcho: boolean;
-  hasSupercellHailUpdraft: boolean;
-  hasConvectiveIntensification: boolean;
-  isPDSOrEmergency: boolean;
-  // Public NWS ASOS Surface Station Telemetry
-  asosStationId: string;
-  asosStationName: string;
-  temperatureF: string;
-  dewPointF: string;
-  barometricPressureInHg: string;
-  pressureDelta6PollInHg: number;
-  pressureTrend: string;
-  windSpeedMph: string;
-  windGustMph: string;
-  windDirectionDeg: string;
-  precipProbPct: string;
-  // Convective Instability & Bypass Metrics
-  currentCapeJkg: number;
-  max6HrCapeJkg: number;
-  capeTrend: string;
-  stormBypassChance: string;
-  environmentStatus: string;
-  // Correlated SPC Mesoscale Discussion (MCD) Metrics
-  correlatedMcdNumber: string | null;
-  mcdWatchProbabilityPct: number | null;
-  mcdConcerning: string | null;
-  mcdAreasAffected: string | null;
-  mcdCentroidLat: number | null;
-  mcdCentroidLon: number | null;
-  mcdWatchBox: string | null;
-  mcdPolygonCoordinates: string | null;
-  mcdPeakTornadoMph: string | null;
-  mcdPeakWindMph: string | null;
-  mcdPeakHailIn: string | null;
-  mcdTargetedWFOs: string | null;
-  isRotationInsideMcdCorridor: boolean;
-}
-
-

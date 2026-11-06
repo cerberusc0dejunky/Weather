@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan to simplify DAISY by removing Google Sheets OAuth, admin login/export buttons, and the Telemetry Debug toggle, while hiding the Mesoscale Discussion UI cards and integrating a 4-step background SPC Mesoscale Discussion + HRRR/Sounding Composite Tornado Scoring Engine (STP, 0-1km SRH, LCL, CAPE/CIN, and temporal/spatial MD indexing).",
+  "updatedAt": "2026-11-06T03:16:26.714988175Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
